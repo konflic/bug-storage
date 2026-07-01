@@ -1,0 +1,42 @@
+# Default: SQLite, single container. Simplest possible deployment.
+#
+# To migrate to Postgres later:
+#   1. Uncomment the `db` service and its volume below.
+#   2. Set DATABASE_URL on the `api` service to the postgres line.
+#   3. Uncomment depends_on.
+# No application code changes are required.
+
+services:
+  api:
+    build: .
+    image: bugdb:latest
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "sqlite:////srv/data/bugs.db"
+      SIMILARITY_THRESHOLD: "0.45"
+      # Shared-secret auth. Set API_KEY (e.g. via a .env file) to require
+      # `X-API-Key`/`Authorization: Bearer` on every request. Empty = no auth.
+      API_KEY: "${API_KEY:-}"
+      # --- Postgres (uncomment to switch) ---
+      # DATABASE_URL: "postgresql+psycopg://bugs:bugs@db:5432/bugs"
+    volumes:
+      - bugdata:/srv/data
+    restart: unless-stopped
+    # depends_on:
+    #   - db
+
+  # --- Postgres service (uncomment to switch) ---
+  # db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: bugs
+  #     POSTGRES_PASSWORD: bugs
+  #     POSTGRES_DB: bugs
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+volumes:
+  bugdata:
+  # pgdata:

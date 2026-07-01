@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""bugctl - helper CLI for the bug database service.
+
+Talks to the FastAPI service over HTTP. Set the API base with --api or the
+BUGDB_API env var (default http://localhost:8000).
+
+Examples
+--------
+  ./bugctl health
+  ./bugctl report --title "KafkaTopic finalizer stuck" \
+      --finalizer strimzi.io/topic-operator --component strimzi \
+      --short "Topic finalizer never removed" --floating
+  ./bugctl search --title "namespace stuck terminating bucket finalizer"
+  ./bugctl list --floating
+  ./bugctl get 1
+  ./bugctl confirm 1                 # mark fixed + confirmed
+  ./bugctl seen 1 --cluster 12345 --namespace my-namespace
+  ./bugctl import-dir ./issue-reports
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+import httpx
+
+DEFAULT_API = os.environ.get("BUGDB_API", "http://localhost:8000")
+DEFAULT_API_KEY = os.environ.get("BUGDB_API_KEY", "")
+
+
+def _client(api: str, api_key: str | None = None) -> httpx.Client:
+    headers = {}
+    key = api_key if api_key is not None else DEFAULT_API_KEY
+    if key:
+        headers["X-API-Key"] = key
+    return httpx.Client(base_url=api, timeout=30.0, headers=headers)
+
+
+def _print(data) -> None:
+    print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+
+
+# --------------------------------------------------------------------------- #
+# Commands
+# --------------------------------------------------------------------------- #
+def cmd_health(args) -> int:
+    with _client(args.api, getattr(args, "api_key", None)) as c:
+        r = c.get("/health")
+        _print(r.json())
+    return 0
+
+
+def _bug_payload(args) -> dict:
+    return {
+        "title": args.title,
+        "short_description": getattr(args, "short", "") or "",
+        "full_description": getattr(args, "full", "") or "",
+        "steps_to_reproduce": getattr(args, "steps", "") or "",
+        "suggested_fix": getattr(args, "fix", "") or "",
+        "component": getattr(args, "component", None),
+        "finalizer": getattr(args, "finalizer", None),
+        "cluster": getattr(args, "cluster", None),
+        "tags": [t for t in (getattr(args, "tags", "") or "").split(",") if t],
+        "is_floating": getattr(args, "floating", False),
+    }
+
+
+def cmd_report(args) -> int:
+    with _client(args.api, getattr(args, "api_key", None)) as c:
+        r = c.post("/bugs/report", json=_bug_payload(args))
+        r.raise_for_status()
+        data = r.json()
+        if data["created"]:
+            print(f"[NEW] created bug #{data['bug']['id']}: {data['bug']['title']}")
+        else:
+            print(
+                f"[DUP] matched bug #{data['bug']['id']} by {data['matched_by']} "
+                f"(score={data['score']}); recorded occurrence "
+                f"(times_seen={data['bug']['times_seen']})"
+            )
+        if args.json:
+            _print(data)
+    return 0
+
+
+def cmd_search(args) -> int:
+    with _client(args.api, getattr(args, "api_key", None)) as c:
+        params = {}
+        if args.threshold is not None:
+            params["threshold"] = args.threshold
+        r = c.post("/bugs/search", params=params, json=_bug_payload(args))
+        r.raise_for_status()
+        data = r.json()
+        if not data["matches"]:
+            print("No similar bugs found.")
+        for m in data["matches"]:
+            print(f"  #{m['bug']['id']:>4}  score={m['score']:.3f}  ({m['reason']})  {m['bug']['title']}")
+        if args.json:
+            _print(data)
+    return 0
+
+
+def cmd_list(args) -> int:
+    params = {"limit": args.limit}
+    if args.status:
+        params["status"] = args.status
+    if args.floating:
+        params["is_floating"] = True
+    if args.component:
+        params["component"] = args.component
+    with _client(args.api, getattr(args, "api_key", None)) as c:
+        r = c.get("/bugs", params=params)
+        r.raise_for_status()
+        for b in r.json():
+            flags = []
+            if b["is_floating"]:
+                flags.append("floating")
+            if b["is_confirmed"]:
+                flags.append("confirmed")
+            elif b["is_fixed"]:
+                flags.append("fixed")
+            tag = f" [{','.join(flags)}]" if flags else ""
+            print(f"  #{b['id']:>4}  seen×{b['times_seen']:<3} {b['status']:<10}{tag}  {b['title']}")
+    return 0
+
+
+def cmd_get(args) -> int:
+    with _client(args.api, getattr(args, "api_key", None)) as c:
+        r = c.get(f"/bugs/{args.id}")
+        r.raise_for_status()
+        _print(r.json())
+    return 0
+
+
+def cmd_update(args) -> int:
+    body = {}
+    for field in ("title", "short", "full", "steps", "fix", "component", "finalizer", "status"):
+        val = getattr(args, field, None)
+        if val is not None:
+            key = {"short": "short_description", "full": "full_description",
+                    "steps": "steps_to_reproduce", "fix": "suggested_fix"}.get(field, field)
+            body[key] = val
+    if args.floating is not None:
+        body["is_floating"] = args.floating
+    with _client(args.api, getattr(args, "api_key", None)) as c:
+        r = c.patch(f"/bugs/{args.id}", json=body)
+        r.raise_for_status()
+        _print(r.json())
+    return 0
+
+
+def cmd_confirm(args) -> int:
+    with _client(args.api, getattr(args, "api_key", None)) as c:
+        r = c.patch(f"/bugs/{args.id}", json={"is_fixed": True, "is_confirmed": True})
+        r.raise_for_status()
+        b = r.json()
+        print(f"#{b['id']} -> status={b['status']} fixed={b['is_fixed']} confirmed={b['is_confirmed']}")
+    return 0
+
+
+def cmd_seen(args) -> int:
+    body = {"cluster": args.cluster, "namespace": args.namespace, "note": args.note or ""}
+    with _client(args.api, getattr(args, "api_key", None)) as c:
+        r = c.post(f"/bugs/{args.id}/occurrences", json=body)
+        r.raise_for_status()
+        b = r.json()
+        print(f"#{b['id']} times_seen={b['times_seen']} last_seen={b['last_seen_at']}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# Importer for plain-text issue files (TITLE / SHORT / FULL / FIX / STEPS layout)
+# --------------------------------------------------------------------------- #
+_SECTION_RE = re.compile(
+    r"^(TITLE|SHORT DESCRIPTION|FULL DESCRIPTION|SUGGESTED FIX(?: / MITIGATION)?|"
+    r"STEPS TO REPRODUCE)\s*$"
+)
+
+
+def parse_issue_file(path: Path) -> dict | None:
+    text = path.read_text(encoding="utf-8")
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in text.splitlines():
+        m = _SECTION_RE.match(line.strip())
+        if m:
+            current = m.group(1).split(" / ")[0]
+            sections[current] = []
+            continue
+        if current:
+            sections[current].append(line)
+    if "TITLE" not in sections:
+        return None
+
+    def join(key: str) -> str:
+        return "\n".join(sections.get(key, [])).strip()
+
+    full = join("FULL DESCRIPTION")
+    finalizer = None
+    component = None
+    fm = re.search(r"Affected finalizer:\s*(\S+)", full)
+    if fm:
+        finalizer = fm.group(1)
+    cm = re.search(r"Component:\s*([^\n(]+)", full)
+    if cm:
+        component = cm.group(1).strip()
+
+    return {
+        "title": " ".join(join("TITLE").split()),
+        "short_description": join("SHORT DESCRIPTION"),
+        "full_description": full,
+        "steps_to_reproduce": join("STEPS TO REPRODUCE"),
+        "suggested_fix": join("SUGGESTED FIX"),
+        "finalizer": finalizer,
+        "component": component,
+        "tags": ["terminating", "kubernetes"],
+        "is_floating": False,
+    }
+
+
+def cmd_import_dir(args) -> int:
+    root = Path(args.directory)
+    files = sorted(root.glob("*.txt"))
+    if not files:
+        print(f"No .txt files in {root}", file=sys.stderr)
+        return 1
+    with _client(args.api, getattr(args, "api_key", None)) as c:
+        for f in files:
+            if f.name.startswith("00-") or "overview" in f.name.lower() or "problems" in f.name.lower():
+                continue
+            payload = parse_issue_file(f)
+            if not payload:
+                print(f"  skip {f.name} (no TITLE)")
+                continue
+            r = c.post("/bugs/report", json=payload)
+            r.raise_for_status()
+            d = r.json()
+            verb = "NEW " if d["created"] else "DUP "
+            print(f"  [{verb}] #{d['bug']['id']}  {f.name}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# Argument parsing
+# --------------------------------------------------------------------------- #
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="bugctl", description="Helper CLI for the bug database service")
+    p.add_argument("--api", default=DEFAULT_API, help=f"API base URL (default {DEFAULT_API})")
+    p.add_argument(
+        "--api-key",
+        default=None,
+        dest="api_key",
+        help="API key sent as X-API-Key (default from BUGDB_API_KEY env var)",
+    )
+    sub = p.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("health").set_defaults(func=cmd_health)
+
+    def add_bug_fields(sp):
+        sp.add_argument("--title", required=True)
+        sp.add_argument("--short", default="")
+        sp.add_argument("--full", default="")
+        sp.add_argument("--steps", default="")
+        sp.add_argument("--fix", default="")
+        sp.add_argument("--component")
+        sp.add_argument("--finalizer")
+        sp.add_argument("--cluster")
+        sp.add_argument("--tags", default="", help="comma-separated")
+        sp.add_argument("--floating", action="store_true")
+        sp.add_argument("--json", action="store_true", help="print full JSON")
+
+    rep = sub.add_parser("report", help="find-or-create a bug (records occurrence on match)")
+    add_bug_fields(rep)
+    rep.set_defaults(func=cmd_report)
+
+    srch = sub.add_parser("search", help="find similar bugs without writing")
+    add_bug_fields(srch)
+    srch.add_argument("--threshold", type=float)
+    srch.set_defaults(func=cmd_search)
+
+    lst = sub.add_parser("list", help="list bugs")
+    lst.add_argument("--status")
+    lst.add_argument("--floating", action="store_true")
+    lst.add_argument("--component")
+    lst.add_argument("--limit", type=int, default=100)
+    lst.set_defaults(func=cmd_list)
+
+    g = sub.add_parser("get", help="show one bug")
+    g.add_argument("id", type=int)
+    g.set_defaults(func=cmd_get)
+
+    upd = sub.add_parser("update", help="update fields/status")
+    upd.add_argument("id", type=int)
+    upd.add_argument("--title")
+    upd.add_argument("--short")
+    upd.add_argument("--full")
+    upd.add_argument("--steps")
+    upd.add_argument("--fix")
+    upd.add_argument("--component")
+    upd.add_argument("--finalizer")
+    upd.add_argument("--status", choices=["open", "fixed", "confirmed", "wont_fix", "duplicate"])
+    upd.add_argument("--floating", type=lambda s: s.lower() == "true")
+    upd.set_defaults(func=cmd_update)
+
+    cf = sub.add_parser("confirm", help="mark a bug fixed + confirmed")
+    cf.add_argument("id", type=int)
+    cf.set_defaults(func=cmd_confirm)
+
+    sn = sub.add_parser("seen", help="record a new occurrence/sighting")
+    sn.add_argument("id", type=int)
+    sn.add_argument("--cluster")
+    sn.add_argument("--namespace")
+    sn.add_argument("--note")
+    sn.set_defaults(func=cmd_seen)
+
+    imp = sub.add_parser("import-dir", help="import *.txt issue files from a directory")
+    imp.add_argument("directory")
+    imp.set_defaults(func=cmd_import_dir)
+
+    return p
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        return args.func(args)
+    except httpx.HTTPStatusError as e:
+        print(f"HTTP {e.response.status_code}: {e.response.text}", file=sys.stderr)
+        return 1
+    except httpx.ConnectError:
+        print(f"Cannot reach API at {args.api}. Is the service running?", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

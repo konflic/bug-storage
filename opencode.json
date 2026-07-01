@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "bugdb": {
+      "type": "local",
+      "command": [".venv/bin/python", "-m", "app.mcp_server"],
+      "cwd": ".",
+      "enabled": true,
+      "environment": {
+        "BUGDB_API": "http://localhost:8000",
+        "BUGDB_API_KEY": ""
+      }
+    }
+  }
+}

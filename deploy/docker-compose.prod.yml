@@ -1,0 +1,62 @@
+# Production stack: Caddy (HTTPS) in front of the FastAPI service.
+#
+# Usage (from the repo root):
+#   make deploy          # build + up, reads deploy/.env.prod
+# or manually:
+#   docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d --build
+#
+# Required vars in deploy/.env.prod: DOMAIN, ACME_EMAIL, API_KEY
+# (See deploy/.env.prod.example.)
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: bugdb:latest
+    environment:
+      DATABASE_URL: "sqlite:////srv/data/bugs.db"
+      SIMILARITY_THRESHOLD: "${SIMILARITY_THRESHOLD:-0.45}"
+      # Shared-secret auth. MUST be set in prod.
+      API_KEY: "${API_KEY:?API_KEY must be set in deploy/.env.prod}"
+      # --- Postgres (uncomment to switch; see db service below) ---
+      # DATABASE_URL: "postgresql+psycopg://bugs:${POSTGRES_PASSWORD}@db:5432/bugs"
+    volumes:
+      # Host path is a mounted persistent disk on the VM (see Terraform).
+      - /srv/data:/srv/data
+    restart: unless-stopped
+    expose:
+      - "8000"   # internal only; not published to the host
+    # depends_on:
+    #   - db
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN:?DOMAIN must be set in deploy/.env.prod}"
+      ACME_EMAIL: "${ACME_EMAIL:?ACME_EMAIL must be set in deploy/.env.prod}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certificates (persist across restarts!)
+      - caddy_config:/config
+    restart: unless-stopped
+
+  # --- Postgres service (uncomment to switch from SQLite) ---
+  # db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: bugs
+  #     POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}"
+  #     POSTGRES_DB: bugs
+  #   volumes:
+  #     - /srv/pgdata:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

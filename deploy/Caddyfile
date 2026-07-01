@@ -1,0 +1,29 @@
+# Caddy reverse proxy with automatic HTTPS (Let's Encrypt).
+#
+# DOMAIN and ACME_EMAIL are injected from the environment (see
+# docker-compose.prod.yml / .env.prod). Caddy obtains and renews the TLS
+# certificate automatically, terminates HTTPS, and forwards plain HTTP to the
+# api container on its internal port 8000.
+#
+# The API's own shared-secret auth (API_KEY) still applies behind this proxy;
+# Caddy just provides the encrypted transport so the key isn't sent in clear.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode gzip
+
+	# Forward everything to the API service on the internal Docker network.
+	reverse_proxy api:8000 {
+		health_uri /health
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

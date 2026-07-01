@@ -1,0 +1,64 @@
+name: Deploy
+
+# Deploys to the production VM over SSH on every push to main.
+#
+# Configure these repository secrets (Settings > Secrets and variables > Actions):
+#   SSH_HOST        public IP / hostname of the VM
+#   SSH_USER        login user (e.g. ubuntu)
+#   SSH_PRIVATE_KEY private key matching the VM's authorized key
+#   DOMAIN          public domain (e.g. bugs.example.com)
+#   ACME_EMAIL      email for Let's Encrypt
+#   API_KEY         shared-secret API key for the service
+#
+# Nothing environment-specific is committed — it all comes from secrets.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_key
+          chmod 600 ~/.ssh/id_key
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Write deploy env
+        run: |
+          mkdir -p deploy
+          cat > deploy/.env.prod <<EOF
+          DOMAIN=${{ secrets.DOMAIN }}
+          ACME_EMAIL=${{ secrets.ACME_EMAIL }}
+          API_KEY=${{ secrets.API_KEY }}
+          SIMILARITY_THRESHOLD=0.45
+          EOF
+
+      - name: Deploy
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/id_key"
+          rsync -az --delete -e "ssh -i ~/.ssh/id_key" \
+            --exclude '.venv' --exclude 'data' --exclude '.git' \
+            --exclude '__pycache__' --exclude '*.pyc' \
+            ./ "$SSH_USER@$SSH_HOST:/srv/bugdb/"
+          ssh -i ~/.ssh/id_key "$SSH_USER@$SSH_HOST" \
+            "cd /srv/bugdb && docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml up -d --build"
+
+      - name: Verify
+        run: |
+          sleep 5
+          curl -fsS "https://${{ secrets.DOMAIN }}/health" && echo " OK"

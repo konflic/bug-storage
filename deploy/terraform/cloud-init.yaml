@@ -1,0 +1,26 @@
+#cloud-config
+# Provisions the VM on first boot:
+#   - installs Docker Engine + compose plugin
+#   - formats (once) and mounts the secondary data disk at /srv/data
+#
+# The secondary disk attached with device_name = "data" appears as
+# /dev/disk/by-id/virtio-data on Yandex Cloud.
+
+package_update: true
+
+runcmd:
+  # --- Docker ---------------------------------------------------------------
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable --now docker
+  - usermod -aG docker ubuntu
+
+  # --- Persistent data disk -------------------------------------------------
+  - DISK=/dev/disk/by-id/virtio-data
+  - mkdir -p /srv/data
+  # Create a filesystem only if the disk is empty (never reformat existing data).
+  - if ! blkid "$DISK"; then mkfs.ext4 -F "$DISK"; fi
+  - echo "$DISK /srv/data ext4 defaults,nofail 0 2" >> /etc/fstab
+  - mount -a
+  - chown -R ubuntu:ubuntu /srv/data
+
+final_message: "bugdb VM ready: Docker installed and /srv/data mounted."

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Smoke test (import app + auth check)
+        env:
+          DATABASE_URL: "sqlite:///./data/test.db"
+          API_KEY: "ci-test-key"
+        run: |
+          mkdir -p data
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from app.main import app
+          c = TestClient(app)
+          assert c.get("/health").status_code == 200
+          assert c.get("/bugs").status_code == 401                       # no key
+          assert c.get("/bugs", headers={"X-API-Key": "ci-test-key"}).status_code == 200
+          print("smoke test OK")
+          PY
+
+      - name: Build Docker image
+        run: docker build -t bugdb:ci .
