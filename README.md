@@ -259,6 +259,10 @@ export BUGDB_API_KEY=$API_KEY
 For the MCP server, add `"BUGDB_API_KEY": "<key>"` to its `environment` block
 in `opencode.json`.
 
+The **web UI** (`/ui`) prompts for the key on first use (or via the header
+"🔑 Set key" button) and stores it in your browser's `localStorage`, sending it
+as `X-API-Key` on every request.
+
 > Auth is intentionally minimal (one shared secret). Always pair it with HTTPS
 > in production so the key isn't sent in clear text — see the deployment notes.
 

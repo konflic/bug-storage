@@ -20,7 +20,7 @@
     background: var(--panel); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10;
   }
   header h1 { font-size: 18px; margin: 0; font-weight: 600; }
-  header .health { font-size: 12px; color: var(--muted); margin-left: auto; }
+  header .health { font-size: 12px; color: var(--muted); }
   header .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 5px; }
   header .dot.ok { background: var(--green); }
   header .dot.bad { background: var(--red); }
@@ -100,6 +100,7 @@
 <body>
 <header>
   <h1>🐞 Bug Database</h1>
+  <button id="keyBtn" style="margin-left:auto">🔑 Set key</button>
   <span class="health"><span id="dot" class="dot"></span><span id="healthText">checking…</span></span>
 </header>
 
@@ -142,6 +143,29 @@ const fmtDate = (s) => s ? new Date(s).toLocaleString() : "—";
 
 let state = { bugs: [], searchMode: false };
 
+// ---------- API key (shared-secret auth) ----------
+const KEY_STORAGE = "bugdb_api_key";
+const getApiKey = () => localStorage.getItem(KEY_STORAGE) || "";
+function setApiKey(k) {
+  if (k) localStorage.setItem(KEY_STORAGE, k);
+  else localStorage.removeItem(KEY_STORAGE);
+  updateKeyIndicator();
+}
+function promptApiKey() {
+  const current = getApiKey();
+  const k = window.prompt(
+    "Enter the API key (leave empty to clear).\nStored locally in your browser and sent as X-API-Key.",
+    current
+  );
+  if (k === null) return false;           // cancelled
+  setApiKey(k.trim());
+  return true;
+}
+function updateKeyIndicator() {
+  const el = $("#keyBtn");
+  if (el) el.textContent = getApiKey() ? "🔑 Key set" : "🔑 Set key";
+}
+
 function toast(msg, isErr=false) {
   const t = $("#toast");
   t.textContent = msg;
@@ -149,10 +173,18 @@ function toast(msg, isErr=false) {
   setTimeout(() => t.className = "toast", 2200);
 }
 
-async function api(path, opts={}) {
-  const res = await fetch(API + path, {
-    headers: { "Content-Type": "application/json" }, ...opts
-  });
+async function api(path, opts={}, _retried=false) {
+  const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+  const key = getApiKey();
+  if (key) headers["X-API-Key"] = key;
+  const res = await fetch(API + path, { ...opts, headers });
+  if (res.status === 401) {
+    // Auth required or key wrong: prompt once, then retry the same request.
+    if (!_retried && promptApiKey() && getApiKey()) {
+      return api(path, opts, true);
+    }
+    throw new Error("401: missing or invalid API key");
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch {}
@@ -277,7 +309,7 @@ async function openDetail(id) {
     ${occ}
     <div class="section-label">Record a sighting</div>
     <div class="row">
-      <div class="field"><label>Cluster</label><input id="occCluster" placeholder="e.g. 18906"></div>
+      <div class="field"><label>Cluster</label><input id="occCluster" placeholder="e.g. 12345"></div>
       <div class="field"><label>Namespace</label><input id="occNs" placeholder="optional"></div>
       <div class="field" style="flex:2"><label>Note</label><input id="occNote" placeholder="optional"></div>
     </div>
@@ -405,10 +437,12 @@ function refreshCurrent() { state.searchMode ? doSearch() : loadList(); }
 // ---------- wiring ----------
 $("#refreshBtn").onclick = loadList;
 $("#newBtn").onclick = newBug;
+$("#keyBtn").onclick = () => { if (promptApiKey()) { checkHealth(); refreshCurrent(); } };
 $("#statusFilter").onchange = loadList;
 $("#floatingFilter").onchange = loadList;
 $("#q").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(doSearch, 250); };
 
+updateKeyIndicator();
 checkHealth();
 loadList();
 setInterval(checkHealth, 15000);
