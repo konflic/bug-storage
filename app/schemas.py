@@ -162,3 +162,25 @@ class StatsOut(BaseModel):
     floating_count: int
     top_recurring: list[dict]  # [{id, title, times_seen}]
     recent_occurrences_per_day: dict[str, int]  # {"YYYY-MM-DD": count}
+
+
+class WhoAmI(BaseModel):
+    """Caller's authenticated role; used by the UI to gate edit controls."""
+    role: str  # "admin" | "readonly" | "anonymous"
+    auth_enabled: bool
+
+
+class AuditOut(BaseModel):
+    """One entry in the append-only action history."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    at: datetime
+    actor_role: str
+    action: str
+    bug_id: int | None
+    bug_title: str | None
+    detail: dict | None
+
+
+class RotateKeyResult(BaseModel):
+    readonly_api_key: str

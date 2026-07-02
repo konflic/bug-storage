@@ -25,10 +25,19 @@ class Settings(BaseSettings):
 
     app_title: str = "Bug Database Service"
 
-    # Simple shared-secret authorization. When set, every request (except the
-    # open paths below) must present this key via the `X-API-Key` header or
-    # `Authorization: Bearer <key>`. Leave empty to disable auth (dev only).
-    api_key: str = ""
+    # --- Authorization (two roles) -----------------------------------------
+    # ADMIN key: full access (read + all writes + admin endpoints).
+    # READ-ONLY key: GET requests only; safe to embed in a shared URL.
+    #
+    # `api_key` is the legacy single key. If `admin_api_key` is unset it is used
+    # as the admin key (backwards compatible with older deployments).
+    admin_api_key: str = ""
+    api_key: str = ""  # legacy alias for the admin key
+
+    # Seed value for the read-only key. The *effective* read-only key is stored
+    # in the DB (so admins can rotate it at runtime); this env var only seeds it
+    # on first boot when the DB has no key yet.
+    readonly_api_key: str = ""
 
     # Paths that never require a key: health check (for probes/healthchecks),
     # the web UI, and the OpenAPI docs. Comma-separated env override supported.
@@ -39,8 +48,13 @@ class Settings(BaseSettings):
         return {p.strip() for p in self.auth_open_paths.split(",") if p.strip()}
 
     @property
+    def effective_admin_key(self) -> str:
+        """Admin key: prefer the explicit admin key, fall back to legacy api_key."""
+        return self.admin_api_key or self.api_key
+
+    @property
     def auth_enabled(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.effective_admin_key)
 
 
 settings = Settings()

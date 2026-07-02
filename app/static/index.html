@@ -100,6 +100,7 @@
 <body>
 <header>
   <h1>🐞 Bug Database</h1>
+  <span id="roleBadge" class="badge" style="margin-left:12px;display:none"></span>
   <button id="keyBtn" style="margin-left:auto">🔑 Set key</button>
   <span class="health"><span id="dot" class="dot"></span><span id="healthText">checking…</span></span>
 </header>
@@ -121,7 +122,10 @@
       <option value="false">Non-floating</option>
     </select>
     <button id="refreshBtn">Refresh</button>
-    <button id="newBtn" class="primary">+ New bug</button>
+    <button id="auditBtn" style="display:none">📜 Audit</button>
+    <button id="shareBtn" style="display:none" title="Copy a read-only link to share">🔗 Share read-only</button>
+    <button id="rotateBtn" style="display:none" title="Invalidate old read-only links">♻ Rotate read key</button>
+    <button id="newBtn" class="primary" style="display:none">+ New bug</button>
   </div>
 
   <div id="grid" class="grid"></div>
@@ -145,7 +149,15 @@ let state = { bugs: [], searchMode: false };
 
 // ---------- API key (shared-secret auth) ----------
 const KEY_STORAGE = "bugdb_api_key";
-const getApiKey = () => localStorage.getItem(KEY_STORAGE) || "";
+let role = "anonymous";   // "admin" | "readonly" | "anonymous", set by /whoami
+
+// A key in the URL (?key=...) takes precedence — this is how shared read-only
+// links auto-authenticate. We keep it out of localStorage so it doesn't leak
+// into an admin's stored key, and strip it from the visible URL bar.
+function urlKey() {
+  return new URLSearchParams(location.search).get("key") || "";
+}
+const getApiKey = () => urlKey() || localStorage.getItem(KEY_STORAGE) || "";
 function setApiKey(k) {
   if (k) localStorage.setItem(KEY_STORAGE, k);
   else localStorage.removeItem(KEY_STORAGE);
@@ -164,6 +176,27 @@ function promptApiKey() {
 function updateKeyIndicator() {
   const el = $("#keyBtn");
   if (el) el.textContent = getApiKey() ? "🔑 Key set" : "🔑 Set key";
+}
+
+// Ask the server which role our key maps to, then show/hide admin-only UI.
+async function refreshRole() {
+  try {
+    const w = await api("/whoami");
+    role = w.role;
+  } catch { role = "anonymous"; }
+  applyRole();
+}
+function isAdmin() { return role === "admin"; }
+function applyRole() {
+  // Admin-only header buttons.
+  for (const id of ["#newBtn", "#shareBtn", "#auditBtn", "#rotateBtn"]) {
+    const el = $(id); if (el) el.style.display = isAdmin() ? "" : "none";
+  }
+  const badge = $("#roleBadge");
+  if (badge) {
+    badge.textContent = role === "readonly" ? "read-only" : role;
+    badge.style.display = role === "anonymous" ? "none" : "";
+  }
 }
 
 function toast(msg, isErr=false) {
@@ -314,6 +347,7 @@ async function openDetail(id, updateHash=true) {
     ${field("Suggested fix", b.suggested_fix)}
     <div class="section-label">Occurrences (${(b.occurrences||[]).length})</div>
     ${occ}
+    ${isAdmin() ? `
     <div class="section-label">Record a sighting</div>
     <div class="row">
       <div class="field"><label>Cluster</label><input id="occCluster" placeholder="e.g. 12345"></div>
@@ -325,9 +359,11 @@ async function openDetail(id, updateHash=true) {
       <button onclick="editBug(${b.id})">Edit</button>
       ${b.is_confirmed ? "" : `<button onclick="confirmBug(${b.id})">Confirm fixed</button>`}
       <button onclick="toggleFloating(${b.id}, ${!b.is_floating})">${b.is_floating ? "Unmark" : "Mark"} floating</button>
+      <button onclick="showAudit(${b.id})">📜 History</button>
       <span class="spacer"></span>
       <button class="danger" onclick="deleteBug(${b.id})">Delete</button>
-    </div>`;
+    </div>` : `
+    <div class="modal-actions"><span class="muted">Read-only view.</span></div>`}`;
   $("#modalBg").className = "modal-bg show";
 }
 
@@ -463,17 +499,79 @@ function routeFromHash() {
 }
 window.addEventListener("hashchange", routeFromHash);
 
+// ---------- admin: share read-only link, rotate key, audit ----------
+async function shareReadOnlyLink() {
+  // Fetch the current read-only key by rotating? No — we need the existing key.
+  // The server never exposes the stored read-only key except right after a
+  // rotation, so "Share" prompts the admin to paste/confirm the read-only key
+  // they hold (or rotate first to mint a fresh one).
+  const rk = window.prompt(
+    "Paste the READ-ONLY key to build a shareable link.\n" +
+    "(Use 'Rotate read key' to mint a new one — it returns the value once.)"
+  );
+  if (!rk) return;
+  const url = location.origin + location.pathname + "?key=" + encodeURIComponent(rk.trim());
+  try { await navigator.clipboard.writeText(url); toast("Read-only link copied"); }
+  catch { window.prompt("Copy this read-only link:", url); }
+}
+
+async function rotateReadKey() {
+  if (!confirm("Rotate the read-only key? All existing shared links will stop working.")) return;
+  try {
+    const r = await api("/admin/rotate-readonly-key", { method: "POST" });
+    const url = location.origin + location.pathname + "?key=" + encodeURIComponent(r.readonly_api_key);
+    try { await navigator.clipboard.writeText(url); } catch {}
+    window.prompt("New read-only key (link copied to clipboard):", url);
+    toast("Read-only key rotated");
+  } catch (e) { toast(e.message, true); }
+}
+
+async function showAudit(bugId) {
+  try {
+    const q = bugId ? ("?bug_id=" + bugId + "&limit=200") : "?limit=200";
+    const rows = await api("/audit" + q);
+    const fmtDetail = (a) => {
+      if (a.action === "update" || a.action === "confirm") {
+        const ch = (a.detail && a.detail.changes) || {};
+        return Object.entries(ch).map(([k, v]) =>
+          `${esc(k)}: ${esc(JSON.stringify(v.old))} → ${esc(JSON.stringify(v.new))}`).join("<br>") || "—";
+      }
+      if (a.action === "sighting") { const d=a.detail||{}; return esc([d.cluster,d.namespace,d.note].filter(Boolean).join(" · ")||"—"); }
+      if (a.detail && a.detail.snapshot) return esc(a.detail.snapshot.title || "");
+      return "";
+    };
+    const list = rows.map(a => `
+      <div class="occ">
+        <span class="when">${fmtDate(a.at)}</span>
+        · <span class="badge">${esc(a.actor_role)}</span>
+        · <b>${esc(a.action)}</b>${a.bug_id ? ` #${a.bug_id}` : ""}
+        ${a.bug_title ? ` — ${esc(a.bug_title)}` : ""}
+        <div class="muted" style="margin-top:2px">${fmtDetail(a)}</div>
+      </div>`).join("") || `<div class="muted">No audit entries.</div>`;
+    $("#modal").innerHTML = `
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <h2 style="flex:1">📜 Audit history ${bugId ? "for #" + bugId : "(all)"}</h2>
+        <button class="close" onclick="closeModal()">×</button>
+      </div>
+      ${list}`;
+    $("#modalBg").className = "modal-bg show";
+  } catch (e) { toast(e.message, true); }
+}
+
 // ---------- wiring ----------
 $("#refreshBtn").onclick = loadList;
 $("#newBtn").onclick = newBug;
-$("#keyBtn").onclick = () => { if (promptApiKey()) { checkHealth(); refreshCurrent(); } };
+$("#auditBtn").onclick = () => showAudit(null);
+$("#shareBtn").onclick = shareReadOnlyLink;
+$("#rotateBtn").onclick = rotateReadKey;
+$("#keyBtn").onclick = () => { if (promptApiKey()) { checkHealth(); refreshRole().then(refreshCurrent); } };
 $("#statusFilter").onchange = loadList;
 $("#floatingFilter").onchange = loadList;
 $("#q").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(doSearch, 250); };
 
 updateKeyIndicator();
 checkHealth();
-loadList().then(routeFromHash);   // open a deep-linked bug once the list is ready
+refreshRole().then(() => loadList().then(routeFromHash));
 setInterval(checkHealth, 15000);
 </script>
 </body>

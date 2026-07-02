@@ -10,8 +10,59 @@ from sqlalchemy.orm import Session
 
 from . import similarity
 from .config import settings
-from .models import Bug, BugOccurrence, BugStatus, Severity, Tag
+from .models import AuditLog, Bug, BugOccurrence, BugStatus, Severity, Tag
 from .schemas import BugCreate, BugUpdate, OccurrenceIn
+
+
+def _bug_snapshot(bug: Bug) -> dict:
+    """Compact JSON snapshot of a bug for the audit trail."""
+    return {
+        "id": bug.id,
+        "title": bug.title,
+        "status": bug.status.value if hasattr(bug.status, "value") else bug.status,
+        "component": bug.component,
+        "severity": bug.severity.value if hasattr(bug.severity, "value") else bug.severity,
+        "is_floating": bug.is_floating,
+        "times_seen": bug.times_seen,
+    }
+
+
+def add_audit(
+    db: Session,
+    *,
+    actor_role: str,
+    action: str,
+    bug: Bug | None = None,
+    bug_id: int | None = None,
+    bug_title: str | None = None,
+    detail: dict | None = None,
+) -> None:
+    """Append one entry to the audit log and commit it."""
+    entry = AuditLog(
+        actor_role=actor_role or "anonymous",
+        action=action,
+        bug_id=bug.id if bug is not None else bug_id,
+        bug_title=bug.title if bug is not None else bug_title,
+        detail=detail,
+    )
+    db.add(entry)
+    db.commit()
+
+
+def list_audit(
+    db: Session,
+    *,
+    bug_id: int | None = None,
+    action: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[AuditLog]:
+    stmt = select(AuditLog).order_by(AuditLog.at.desc())
+    if bug_id is not None:
+        stmt = stmt.where(AuditLog.bug_id == bug_id)
+    if action is not None:
+        stmt = stmt.where(AuditLog.action == action)
+    return list(db.scalars(stmt.limit(limit).offset(offset)).all())
 
 
 def _utcnow() -> datetime:
@@ -250,10 +301,29 @@ def record_occurrence(db: Session, bug: Bug, occ: OccurrenceIn) -> Bug:
     return bug
 
 
+def _compute_diff(bug: Bug, data: dict) -> dict:
+    """Before/after values for fields being changed (for the audit log)."""
+    diff: dict = {}
+    for key, new in data.items():
+        old = getattr(bug, key, None)
+        old_v = old.value if hasattr(old, "value") else old
+        new_v = new.value if hasattr(new, "value") else new
+        if old_v != new_v:
+            diff[key] = {"old": old_v, "new": new_v}
+    return diff
+
+
 def update_bug(db: Session, bug: Bug, payload: BugUpdate) -> Bug:
     data = payload.model_dump(exclude_unset=True)
 
+    # Capture a diff of scalar fields BEFORE mutating (tags handled separately).
+    bug.last_diff = _compute_diff(bug, {k: v for k, v in data.items() if k != "tags"})
+
     if "tags" in data:
+        old_tags = bug.tags
+        new_tags = _clean_tag_names(data["tags"])
+        if old_tags != new_tags:
+            bug.last_diff["tags"] = {"old": old_tags, "new": new_tags}
         bug.tags_rel = _get_or_create_tags(db, data.pop("tags"))
 
     # Map the convenience flags onto the single source of truth (status).

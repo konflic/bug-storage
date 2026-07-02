@@ -250,3 +250,49 @@ class BugOccurrence(Base):
     evidence: Mapped[dict | None] = mapped_column(JSON, default=None)
 
     bug: Mapped["Bug"] = relationship(back_populates="occurrences")
+
+
+class AuditLog(Base):
+    """Append-only history of mutating actions.
+
+    One row per write (create / update / delete / confirm / sighting). Stores
+    who did it (the role that authenticated), what changed (a before/after diff
+    for updates, the full snapshot for create/delete), and when. Never updated
+    or deleted by the app, so it is a trustworthy audit trail.
+    """
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+
+    # Role that performed the action: "admin" | "readonly" | "anonymous".
+    actor_role: Mapped[str] = mapped_column(String(20), default="admin", index=True)
+    # Action verb: create | update | delete | confirm | sighting | rotate_readonly_key.
+    action: Mapped[str] = mapped_column(String(32), index=True)
+
+    # Target bug (nullable: e.g. key rotation isn't tied to a bug). No FK so the
+    # audit row survives the bug being deleted.
+    bug_id: Mapped[int | None] = mapped_column(Integer, index=True, default=None)
+    bug_title: Mapped[str | None] = mapped_column(String(500), default=None)
+
+    # Structured change detail. For update: {"field": {"old":..., "new":...}}.
+    # For create/delete: a snapshot of the record. For sighting: the occurrence.
+    detail: Mapped[dict | None] = mapped_column(JSON, default=None)
+
+
+class AppConfig(Base):
+    """Tiny key/value store for runtime-mutable settings.
+
+    Used to hold the *effective* read-only API key so an admin can rotate it at
+    runtime (env vars can't be changed by a running process). Seeded from the
+    READONLY_API_KEY env var on first boot.
+    """
+
+    __tablename__ = "app_config"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )

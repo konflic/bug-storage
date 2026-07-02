@@ -263,6 +263,46 @@ The **web UI** (`/ui`) prompts for the key on first use (or via the header
 "🔑 Set key" button) and stores it in your browser's `localStorage`, sending it
 as `X-API-Key` on every request.
 
+### Roles: admin vs read-only
+
+Two keys with different power:
+
+| Key | Access | Use |
+|-----|--------|-----|
+| `ADMIN_API_KEY` | Full: read + all writes + `/audit` + key rotation | Your key |
+| `READONLY_API_KEY` | **GET only** (writes → `403`) | Share with others |
+
+A request can present its key in a header, a bearer token, **or a `?key=` query
+param** — the last makes shareable links possible:
+
+```
+http://<host>/ui?key=<READ_ONLY_KEY>
+```
+
+Anyone opening that link gets a read-only view (edit/delete/new buttons are
+hidden). In the UI, an admin can **Share read-only** (copy such a link) and
+**Rotate read key** (mint a new read-only key, invalidating old links). Rotate
+via API:
+
+```bash
+curl -X POST -H "X-API-Key: $ADMIN_API_KEY" http://<host>/admin/rotate-readonly-key
+```
+
+The read-only key is stored in the DB (seeded from `READONLY_API_KEY` on first
+boot) so rotation works at runtime without a redeploy.
+
+### Audit history
+
+Every mutating action (create / update / delete / confirm / sighting / key
+rotation) is recorded in an append-only audit log with **who** (role), **what**
+(before/after diff for edits, snapshot for delete), and **when**. Admins view it
+in the UI ("📜 Audit" / per-bug "📜 History") or via the API:
+
+```bash
+curl -H "X-API-Key: $ADMIN_API_KEY" "http://<host>/audit?limit=100"
+curl -H "X-API-Key: $ADMIN_API_KEY" "http://<host>/audit?bug_id=8"
+```
+
 > Auth is intentionally minimal (one shared secret). Always pair it with HTTPS
 > in production so the key isn't sent in clear text — see the deployment notes.
 
