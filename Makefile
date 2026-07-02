@@ -17,6 +17,8 @@ ENV_PROD    := deploy/.env.prod
 COMPOSE     := docker compose --env-file $(ENV_PROD) -f deploy/docker-compose.prod.yml
 SSH_USER    ?= ubuntu
 REMOTE_DIR  ?= /srv/bugdb
+REMOTE_DATA ?= /srv/data
+LOCAL_DB    ?= data/bugs.db
 TF_DIR      := deploy/terraform
 
 # Resolve the VM IP from Terraform output unless SSH_HOST is passed in.
@@ -163,3 +165,28 @@ fetch-backups: check-host ## Download remote backups into ./backups
 	@mkdir -p backups
 	@rsync -az -e ssh "$(SSH_USER)@$(SSH_HOST):/srv/backups/" ./backups/
 	@echo ">> Backups synced to ./backups"
+
+# --------------------------------------------------------------------------- #
+# Data migration
+# --------------------------------------------------------------------------- #
+.PHONY: seed-remote
+seed-remote: check-host ## Push local SQLite DB to the VM (OVERWRITES remote data)
+	@test -f "$(LOCAL_DB)" || { echo "ERROR: $(LOCAL_DB) not found (set LOCAL_DB=path)."; exit 1; }
+	@echo "WARNING: this OVERWRITES the database at $(SSH_HOST):$(REMOTE_DATA)/bugs.db"
+	@read -p "Type 'yes' to continue: " ans; [ "$$ans" = "yes" ] || { echo "aborted."; exit 1; }
+	@echo ">> Making a consistent local snapshot ..."
+	@if command -v sqlite3 >/dev/null 2>&1; then \
+		sqlite3 "$(LOCAL_DB)" ".backup '/tmp/bugdb-seed.db'"; \
+	else \
+		python -c "import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); d=sqlite3.connect('/tmp/bugdb-seed.db'); s.backup(d); d.close(); s.close()" "$(LOCAL_DB)"; \
+	fi
+	@echo ">> Stopping remote API ..."
+	@$(SSH) "cd $(REMOTE_DIR) && docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml stop api"
+	@echo ">> Copying DB to $(SSH_HOST):$(REMOTE_DATA)/bugs.db ..."
+	@$(SSH) "sudo rm -f $(REMOTE_DATA)/bugs.db-wal $(REMOTE_DATA)/bugs.db-shm"
+	@scp /tmp/bugdb-seed.db "$(SSH_USER)@$(SSH_HOST):/tmp/bugdb-seed.db"
+	@$(SSH) "sudo mv /tmp/bugdb-seed.db $(REMOTE_DATA)/bugs.db && sudo chown $(SSH_USER):$(SSH_USER) $(REMOTE_DATA)/bugs.db"
+	@rm -f /tmp/bugdb-seed.db
+	@echo ">> Restarting remote API ..."
+	@$(SSH) "cd $(REMOTE_DIR) && docker compose --env-file deploy/.env.prod -f deploy/docker-compose.prod.yml start api"
+	@echo ">> Done. Verify with: make ping  (then ./bugctl list against the host)"

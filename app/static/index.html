@@ -268,11 +268,17 @@ async function doSearch() {
 }
 
 // ---------- Detail modal ----------
-function closeModal() { $("#modalBg").className = "modal-bg"; }
+function closeModal() {
+  $("#modalBg").className = "modal-bg";
+  // Clear the deep-link hash when closing (without adding history entries).
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+}
 $("#modalBg").onclick = (e) => { if (e.target.id === "modalBg") closeModal(); };
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 
-async function openDetail(id) {
+async function openDetail(id, updateHash=true) {
+  // Reflect the open bug in the URL so it can be shared / bookmarked.
+  if (updateHash && location.hash !== `#/bug/${id}`) location.hash = `/bug/${id}`;
   let b;
   try { b = await api("/bugs/" + id); } catch (e) { return toast(e.message, true); }
   const occ = (b.occurrences||[]).slice().reverse().map(o => `
@@ -288,6 +294,7 @@ async function openDetail(id) {
   $("#modal").innerHTML = `
     <div style="display:flex;align-items:flex-start;gap:10px">
       <h2 style="flex:1"><span class="id">#${b.id}</span> ${esc(b.title)}</h2>
+      <button onclick="copyBugLink(${b.id})" title="Copy shareable link">🔗 Copy link</button>
       <button class="close" onclick="closeModal()">×</button>
     </div>
     <div class="meta" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
@@ -434,6 +441,28 @@ async function saveBug(id) {
 
 function refreshCurrent() { state.searchMode ? doSearch() : loadList(); }
 
+// ---------- shareable links / hash routing ----------
+function bugLink(id) { return location.origin + location.pathname + "#/bug/" + id; }
+
+async function copyBugLink(id) {
+  const url = bugLink(id);
+  try {
+    await navigator.clipboard.writeText(url);
+    toast("Link copied: " + url);
+  } catch {
+    // Clipboard API needs a secure context (https) or permission; fall back.
+    window.prompt("Copy this link:", url);
+  }
+}
+
+// Open whatever bug the URL hash points at (#/bug/<id>), or close if none.
+function routeFromHash() {
+  const m = location.hash.match(/^#\/bug\/(\d+)$/);
+  if (m) openDetail(parseInt(m[1], 10), false);   // don't re-set the hash
+  else closeModal();
+}
+window.addEventListener("hashchange", routeFromHash);
+
 // ---------- wiring ----------
 $("#refreshBtn").onclick = loadList;
 $("#newBtn").onclick = newBug;
@@ -444,7 +473,7 @@ $("#q").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(do
 
 updateKeyIndicator();
 checkHealth();
-loadList();
+loadList().then(routeFromHash);   // open a deep-linked bug once the list is ready
 setInterval(checkHealth, 15000);
 </script>
 </body>

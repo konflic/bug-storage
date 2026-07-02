@@ -8,6 +8,9 @@ data/
 *.db-wal
 *.db-shm
 
+# Secrets
+key.txt
+
 # Local backups
 backups/
 

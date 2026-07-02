@@ -78,6 +78,33 @@ For the MCP server, add `"BUGDB_API_KEY": "<key>"` to its `environment` in
 
 ---
 
+## Migrating existing local data to the VM
+
+Both local and prod use SQLite, so migrating is just copying the DB file to the
+VM's persistent `/srv/data` disk. One command automates it (snapshot → stop API
+→ copy → restart):
+
+```bash
+make seed-remote                 # uses ./data/bugs.db by default
+make seed-remote LOCAL_DB=path/to/other.db
+```
+
+It asks for a `yes` confirmation because it **overwrites** the remote database.
+It makes a consistent snapshot first (safe even if the local app is running) and
+clears stale WAL/SHM sidecar files on the target. The app auto-upgrades the
+schema on restart, so a DB from an older version is fine.
+
+Verify afterwards:
+```bash
+make ping
+BUGDB_API=https://<domain> BUGDB_API_KEY=$(make -s show-key) ./bugctl list
+```
+
+> This is for **SQLite → SQLite**. Migrating to Managed PostgreSQL is not a file
+> copy — replay the data through the API instead (ask for a transfer script).
+
+---
+
 ## Updating the API key (rotation)
 
 One command generates a new key, pushes it to the server, and restarts the API:
