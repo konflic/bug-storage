@@ -106,33 +106,39 @@
 </header>
 
 <div class="container">
-  <div class="toolbar">
-    <input id="q" class="search" placeholder="Search bugs (title, description, repro)…" />
-    <select id="statusFilter">
-      <option value="">All statuses</option>
-      <option value="open">open</option>
-      <option value="fixed">fixed</option>
-      <option value="confirmed">confirmed</option>
-      <option value="wont_fix">wont_fix</option>
-      <option value="duplicate">duplicate</option>
-    </select>
-    <select id="floatingFilter">
-      <option value="">Floating: any</option>
-      <option value="true">Floating only</option>
-      <option value="false">Non-floating</option>
-    </select>
-    <button id="refreshBtn">Refresh</button>
-    <button id="auditBtn" style="display:none">📜 Audit</button>
-    <button id="shareBtn" style="display:none" title="Copy a read-only link to share">🔗 Share read-only</button>
-    <button id="rotateBtn" style="display:none" title="Invalidate old read-only links">♻ Rotate read key</button>
-    <button id="newBtn" class="primary" style="display:none">+ New bug</button>
+  <!-- List view -->
+  <div id="listView">
+    <div class="toolbar">
+      <input id="q" class="search" placeholder="Search bugs (title, description, repro)…" />
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+        <option value="open">open</option>
+        <option value="fixed">fixed</option>
+        <option value="confirmed">confirmed</option>
+        <option value="wont_fix">wont_fix</option>
+        <option value="duplicate">duplicate</option>
+      </select>
+      <select id="floatingFilter">
+        <option value="">Floating: any</option>
+        <option value="true">Floating only</option>
+        <option value="false">Non-floating</option>
+      </select>
+      <button id="refreshBtn">Refresh</button>
+      <button id="auditBtn" style="display:none">📜 Audit</button>
+      <button id="shareBtn" style="display:none" title="Copy a read-only link to share">🔗 Share read-only</button>
+      <button id="rotateBtn" style="display:none" title="Invalidate old read-only links">♻ Rotate read key</button>
+      <button id="newBtn" class="primary" style="display:none">+ New bug</button>
+    </div>
+
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" style="display:none">No bugs found.</div>
   </div>
 
-  <div id="grid" class="grid"></div>
-  <div id="empty" class="empty" style="display:none">No bugs found.</div>
+  <!-- Full-page single-bug view (shown instead of the list) -->
+  <div id="bugView" style="display:none"></div>
 </div>
 
-<!-- Detail / edit modal -->
+<!-- Modal for edit form / audit / share popup -->
 <div id="modalBg" class="modal-bg">
   <div class="modal" id="modal"></div>
 </div>
@@ -300,20 +306,30 @@ async function doSearch() {
   } catch (e) { toast(e.message, true); }
 }
 
-// ---------- Detail modal ----------
+// ---------- View switching (list <-> full-page bug) ----------
 function closeModal() {
   $("#modalBg").className = "modal-bg";
-  // Clear the deep-link hash when closing (without adding history entries).
-  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
 }
 $("#modalBg").onclick = (e) => { if (e.target.id === "modalBg") closeModal(); };
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 
+function showListView() {
+  $("#bugView").style.display = "none";
+  $("#bugView").innerHTML = "";
+  $("#listView").style.display = "";
+}
+
+// Navigate back to the list (clears the #/bug hash, keeps ?key= in the URL).
+function backToList() {
+  if (location.hash) location.hash = "";       // triggers hashchange -> routeFromHash
+  else showListView();
+}
+
 async function openDetail(id, updateHash=true) {
   // Reflect the open bug in the URL so it can be shared / bookmarked.
-  if (updateHash && location.hash !== `#/bug/${id}`) location.hash = `/bug/${id}`;
+  if (updateHash && location.hash !== `#/bug/${id}`) { location.hash = `/bug/${id}`; return; }
   let b;
-  try { b = await api("/bugs/" + id); } catch (e) { return toast(e.message, true); }
+  try { b = await api("/bugs/" + id); } catch (e) { toast(e.message, true); return; }
   const occ = (b.occurrences||[]).slice().reverse().map(o => `
     <div class="occ">
       <span class="when">${fmtDate(o.seen_at)}</span>
@@ -324,48 +340,56 @@ async function openDetail(id, updateHash=true) {
 
   const field = (label, val) => val ? `<div class="section-label">${label}</div><pre class="block">${esc(val)}</pre>` : "";
 
-  $("#modal").innerHTML = `
-    <div style="display:flex;align-items:flex-start;gap:10px">
-      <h2 style="flex:1"><span class="id">#${b.id}</span> ${esc(b.title)}</h2>
-      <button onclick="copyBugLink(${b.id})" title="Copy shareable link">🔗 Copy link</button>
-      <button class="close" onclick="closeModal()">×</button>
+  $("#bugView").innerHTML = `
+    <div class="toolbar">
+      <button onclick="backToList()">← Back to list</button>
+      <span class="spacer" style="flex:1"></span>
+      <button class="primary" onclick="copyBugLink(${b.id})" title="Copy shareable link">🔗 Copy link</button>
     </div>
-    <div class="meta" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-      ${badge(b)}
-      <span class="muted">seen ×${b.times_seen} · updated ×${b.times_updated}</span>
-      <span class="muted">first ${fmtDate(b.first_seen_at)} · last ${fmtDate(b.last_seen_at)}</span>
-    </div>
-    <div class="meta" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
-      ${b.component ? `<span class="muted">component: ${esc(b.component)}</span>` : ""}
-      ${b.finalizer ? `<span class="muted">finalizer: ${esc(b.finalizer)}</span>` : ""}
-      ${b.cluster ? `<span class="muted">cluster: ${esc(b.cluster)}</span>` : ""}
-    </div>
-    ${(b.tags||[]).length ? `<div style="margin-bottom:6px">${b.tags.map(t=>`<span class="tag">#${esc(t)}</span>`).join(" ")}</div>` : ""}
-    ${field("Short description", b.short_description)}
-    ${field("Full description", b.full_description)}
-    ${field("Steps to reproduce", b.steps_to_reproduce)}
-    ${field("Suggested fix", b.suggested_fix)}
-    <div class="section-label">Occurrences (${(b.occurrences||[]).length})</div>
-    ${occ}
-    ${isAdmin() ? `
-    <div class="section-label">Record a sighting</div>
-    <div class="row">
-      <div class="field"><label>Cluster</label><input id="occCluster" placeholder="e.g. 12345"></div>
-      <div class="field"><label>Namespace</label><input id="occNs" placeholder="optional"></div>
-      <div class="field" style="flex:2"><label>Note</label><input id="occNote" placeholder="optional"></div>
-    </div>
-    <div class="modal-actions">
-      <button onclick="recordSighting(${b.id})">+ Record sighting</button>
-      <button onclick="editBug(${b.id})">Edit</button>
-      ${b.is_confirmed ? "" : `<button onclick="confirmBug(${b.id})">Confirm fixed</button>`}
-      <button onclick="toggleFloating(${b.id}, ${!b.is_floating})">${b.is_floating ? "Unmark" : "Mark"} floating</button>
-      <button onclick="showAudit(${b.id})">📜 History</button>
-      <span class="spacer"></span>
-      <button class="danger" onclick="deleteBug(${b.id})">Delete</button>
-    </div>` : `
-    <div class="modal-actions"><span class="muted">Read-only view.</span></div>`}`;
-  $("#modalBg").className = "modal-bg show";
+    <div class="card" style="cursor:default">
+      <h2 style="margin:0 0 8px"><span class="id">#${b.id}</span> ${esc(b.title)}</h2>
+      <div class="meta" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        ${badge(b)}
+        <span class="muted">seen ×${b.times_seen} · updated ×${b.times_updated}</span>
+        <span class="muted">first ${fmtDate(b.first_seen_at)} · last ${fmtDate(b.last_seen_at)}</span>
+      </div>
+      <div class="meta" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        ${b.component ? `<span class="muted">component: ${esc(b.component)}</span>` : ""}
+        ${b.finalizer ? `<span class="muted">finalizer: ${esc(b.finalizer)}</span>` : ""}
+        ${b.cluster ? `<span class="muted">cluster: ${esc(b.cluster)}</span>` : ""}
+      </div>
+      ${(b.tags||[]).length ? `<div style="margin-bottom:6px">${b.tags.map(t=>`<span class="tag">#${esc(t)}</span>`).join(" ")}</div>` : ""}
+      ${field("Short description", b.short_description)}
+      ${field("Full description", b.full_description)}
+      ${field("Steps to reproduce", b.steps_to_reproduce)}
+      ${field("Suggested fix", b.suggested_fix)}
+      <div class="section-label">Occurrences (${(b.occurrences||[]).length})</div>
+      ${occ}
+      ${isAdmin() ? `
+      <div class="section-label">Record a sighting</div>
+      <div class="row">
+        <div class="field"><label>Cluster</label><input id="occCluster" placeholder="e.g. 12345"></div>
+        <div class="field"><label>Namespace</label><input id="occNs" placeholder="optional"></div>
+        <div class="field" style="flex:2"><label>Note</label><input id="occNote" placeholder="optional"></div>
+      </div>
+      <div class="modal-actions">
+        <button onclick="recordSighting(${b.id})">+ Record sighting</button>
+        <button onclick="editBug(${b.id})">Edit</button>
+        ${b.is_confirmed ? "" : `<button onclick="confirmBug(${b.id})">Confirm fixed</button>`}
+        <button onclick="toggleFloating(${b.id}, ${!b.is_floating})">${b.is_floating ? "Unmark" : "Mark"} floating</button>
+        <button onclick="showAudit(${b.id})">📜 History</button>
+        <span class="spacer"></span>
+        <button class="danger" onclick="deleteBug(${b.id})">Delete</button>
+      </div>` : `
+      <div class="modal-actions"><span class="muted">Read-only view.</span></div>`}
+    </div>`;
+  $("#listView").style.display = "none";
+  $("#bugView").style.display = "";
+  window.scrollTo(0, 0);
 }
+
+// Re-render the current single-bug page (used after a mutation on it).
+function reopenBug(id) { openDetail(id, false); }
 
 async function recordSighting(id) {
   const body = {
@@ -376,7 +400,7 @@ async function recordSighting(id) {
   try {
     await api(`/bugs/${id}/occurrences`, { method: "POST", body: JSON.stringify(body) });
     toast("Sighting recorded");
-    openDetail(id); refreshCurrent();
+    reopenBug(id);
   } catch (e) { toast(e.message, true); }
 }
 
@@ -384,7 +408,7 @@ async function confirmBug(id) {
   try {
     await api(`/bugs/${id}`, { method: "PATCH", body: JSON.stringify({ is_fixed: true, is_confirmed: true }) });
     toast("Marked fixed + confirmed");
-    openDetail(id); refreshCurrent();
+    reopenBug(id);
   } catch (e) { toast(e.message, true); }
 }
 
@@ -392,7 +416,7 @@ async function toggleFloating(id, val) {
   try {
     await api(`/bugs/${id}`, { method: "PATCH", body: JSON.stringify({ is_floating: val }) });
     toast(val ? "Marked floating" : "Unmarked floating");
-    openDetail(id); refreshCurrent();
+    reopenBug(id);
   } catch (e) { toast(e.message, true); }
 }
 
@@ -400,7 +424,9 @@ async function deleteBug(id) {
   if (!confirm(`Delete bug #${id}? This cannot be undone.`)) return;
   try {
     await api("/bugs/" + id, { method: "DELETE" });
-    toast("Deleted"); closeModal(); refreshCurrent();
+    toast("Deleted");
+    backToList();      // leave the (now gone) bug page
+    refreshCurrent();
   } catch (e) { toast(e.message, true); }
 }
 
@@ -466,11 +492,11 @@ async function saveBug(id) {
       // Use report (find-or-create) to leverage dedupe.
       const res = await api("/bugs/report", { method: "POST", body: JSON.stringify(payload) });
       toast(res.created ? `Created bug #${res.bug.id}` : `Matched existing #${res.bug.id} (${res.matched_by})`);
-      closeModal(); refreshCurrent(); openDetail(res.bug.id);
+      closeModal(); openDetail(res.bug.id);   // navigate to its page
     } else {
       payload.status = $("#f_status").value;
       const b = await api("/bugs/" + id, { method: "PATCH", body: JSON.stringify(payload) });
-      toast("Saved"); refreshCurrent(); openDetail(b.id);
+      toast("Saved"); closeModal(); reopenBug(b.id);
     }
   } catch (e) { toast(e.message, true); }
 }
@@ -478,26 +504,71 @@ async function saveBug(id) {
 function refreshCurrent() { state.searchMode ? doSearch() : loadList(); }
 
 // ---------- shareable links / hash routing ----------
-function bugLink(id) { return location.origin + location.pathname + "#/bug/" + id; }
-
-async function copyBugLink(id) {
-  const url = bugLink(id);
-  try {
-    await navigator.clipboard.writeText(url);
-    toast("Link copied: " + url);
-  } catch {
-    // Clipboard API needs a secure context (https) or permission; fall back.
-    window.prompt("Copy this link:", url);
+// Build a per-bug shareable URL that carries the READ-ONLY key so the
+// recipient can open it directly: .../ui?key=<readonly>#/bug/<id>
+//   - admin: fetch the read-only key from the server.
+//   - readonly viewer: reuse the key already in their URL.
+//   - no auth: plain link without a key.
+async function readOnlyKeyForSharing() {
+  if (role === "readonly") return urlKey();       // reuse the shared key we arrived with
+  if (isAdmin()) {
+    try {
+      const r = await api("/admin/readonly-key");
+      return r.readonly_api_key || "";
+    } catch { return ""; }
   }
+  return "";
 }
 
-// Open whatever bug the URL hash points at (#/bug/<id>), or close if none.
+async function buildBugShareUrl(id) {
+  const key = await readOnlyKeyForSharing();
+  const base = location.origin + location.pathname;
+  const q = key ? ("?key=" + encodeURIComponent(key)) : "";
+  return base + q + "#/bug/" + id;
+}
+
+async function copyBugLink(id) {
+  const url = await buildBugShareUrl(id);
+  if (isAdmin() && !url.includes("?key=")) {
+    toast("No read-only key set. Use 'Rotate read key' to create one.", true);
+    return;
+  }
+  openSharePopup(url, `Share bug #${id}`);
+}
+
+// Show whatever the URL hash points at: a bug page (#/bug/<id>) or the list.
 function routeFromHash() {
   const m = location.hash.match(/^#\/bug\/(\d+)$/);
   if (m) openDetail(parseInt(m[1], 10), false);   // don't re-set the hash
-  else closeModal();
+  else showListView();
 }
 window.addEventListener("hashchange", routeFromHash);
+
+// ---------- Share popup (HTML modal, not a native prompt) ----------
+function openSharePopup(url, heading) {
+  $("#modal").innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <h2 style="flex:1">🔗 ${esc(heading || "Shareable link")}</h2>
+      <button class="close" onclick="closeModal()">×</button>
+    </div>
+    <p class="muted" style="margin:4px 0 10px">
+      Read-only link. Anyone who opens it can view (but not edit) this content.
+    </p>
+    <div class="row" style="align-items:stretch">
+      <input id="shareUrl" class="search" style="flex:1" readonly value="${esc(url)}">
+      <button class="primary" id="shareCopyBtn">Copy</button>
+    </div>`;
+  $("#modalBg").className = "modal-bg show";
+  const input = $("#shareUrl");
+  input.focus(); input.select();
+  $("#shareCopyBtn").onclick = async () => {
+    input.select();
+    try { await navigator.clipboard.writeText(url); }
+    catch { document.execCommand && document.execCommand("copy"); }
+    toast("Link copied");
+    $("#shareCopyBtn").textContent = "Copied ✓";
+  };
+}
 
 // ---------- admin: share read-only link, rotate key, audit ----------
 async function shareReadOnlyLink() {
@@ -509,8 +580,7 @@ async function shareReadOnlyLink() {
       return;
     }
     const url = location.origin + location.pathname + "?key=" + encodeURIComponent(r.readonly_api_key);
-    try { await navigator.clipboard.writeText(url); toast("Read-only link copied to clipboard"); }
-    catch { window.prompt("Copy this read-only link:", url); }
+    openSharePopup(url, "Share read-only access");
   } catch (e) { toast(e.message, true); }
 }
 
@@ -519,8 +589,7 @@ async function rotateReadKey() {
   try {
     const r = await api("/admin/rotate-readonly-key", { method: "POST" });
     const url = location.origin + location.pathname + "?key=" + encodeURIComponent(r.readonly_api_key);
-    try { await navigator.clipboard.writeText(url); } catch {}
-    window.prompt("New read-only key (link copied to clipboard):", url);
+    openSharePopup(url, "New read-only link (old links now invalid)");
     toast("Read-only key rotated");
   } catch (e) { toast(e.message, true); }
 }
