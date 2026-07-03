@@ -501,18 +501,17 @@ window.addEventListener("hashchange", routeFromHash);
 
 // ---------- admin: share read-only link, rotate key, audit ----------
 async function shareReadOnlyLink() {
-  // Fetch the current read-only key by rotating? No — we need the existing key.
-  // The server never exposes the stored read-only key except right after a
-  // rotation, so "Share" prompts the admin to paste/confirm the read-only key
-  // they hold (or rotate first to mint a fresh one).
-  const rk = window.prompt(
-    "Paste the READ-ONLY key to build a shareable link.\n" +
-    "(Use 'Rotate read key' to mint a new one — it returns the value once.)"
-  );
-  if (!rk) return;
-  const url = location.origin + location.pathname + "?key=" + encodeURIComponent(rk.trim());
-  try { await navigator.clipboard.writeText(url); toast("Read-only link copied"); }
-  catch { window.prompt("Copy this read-only link:", url); }
+  // Admin fetches the current read-only key from the server and builds a link.
+  try {
+    const r = await api("/admin/readonly-key");
+    if (!r.readonly_api_key) {
+      toast("No read-only key set. Use 'Rotate read key' to create one.", true);
+      return;
+    }
+    const url = location.origin + location.pathname + "?key=" + encodeURIComponent(r.readonly_api_key);
+    try { await navigator.clipboard.writeText(url); toast("Read-only link copied to clipboard"); }
+    catch { window.prompt("Copy this read-only link:", url); }
+  } catch (e) { toast(e.message, true); }
 }
 
 async function rotateReadKey() {

@@ -12,7 +12,7 @@ from . import __version__, crud, similarity
 from .auth import ApiKeyMiddleware
 from .config import settings
 from .database import Base, SessionLocal, engine, ensure_schema, get_db
-from .keys import rotate_readonly_key, seed_readonly_key
+from .keys import get_readonly_key, rotate_readonly_key, seed_readonly_key
 from .models import BugStatus, Category, RootCause, Severity
 from .schemas import (
     AuditOut,
@@ -257,6 +257,15 @@ def get_audit(
     Admin only."""
     return [AuditOut.model_validate(a) for a in crud.list_audit(
         db, bug_id=bug_id, action=action, limit=limit, offset=offset)]
+
+
+@app.get("/admin/readonly-key", response_model=RotateKeyResult,
+         summary="Get the current read-only key (admin)")
+def get_readonly_key_ep(_admin: str = Depends(require_admin),
+                        db: Session = Depends(get_db)) -> RotateKeyResult:
+    """Return the current read-only key so an admin can build a shareable link.
+    Admin only; the read-only key itself can never read this endpoint."""
+    return RotateKeyResult(readonly_api_key=get_readonly_key(db))
 
 
 @app.post("/admin/rotate-readonly-key", response_model=RotateKeyResult,
