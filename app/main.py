@@ -115,6 +115,7 @@ def search_bugs(
         short_description=payload.short_description,
         full_description=payload.full_description,
         steps_to_reproduce=payload.steps_to_reproduce,
+        impact=payload.impact,
         component=payload.component,
         finalizer=payload.finalizer,
         k8s_kind=payload.k8s_kind,

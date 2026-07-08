@@ -115,6 +115,7 @@ def bug_corpus(
     short_description: str = "",
     full_description: str = "",
     steps_to_reproduce: str = "",
+    impact: str = "",
     component: str | None = None,
     finalizer: str | None = None,
     error_signature: str | None = None,
@@ -126,6 +127,7 @@ def bug_corpus(
     tokens |= tokenize(short_description)
     tokens |= tokenize(full_description)
     tokens |= tokenize(steps_to_reproduce)
+    tokens |= tokenize(impact)
     tokens |= tokenize(component)
     tokens |= tokenize(finalizer)
     tokens |= tokenize(error_signature)

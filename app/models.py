@@ -156,6 +156,9 @@ class Bug(Base):
     # verified on, dates). Kept separate from suggested_fix so the proposal and
     # the resolution history don't get conflated.
     fix_notes: Mapped[str] = mapped_column(Text, default="")
+    # Potential risks / blast radius of this bug (e.g. data loss, downtime,
+    # cascading failures, user-facing impact).
+    impact: Mapped[str] = mapped_column(Text, default="")
 
     # Optional structured identity fields (also feed fingerprint/signature).
     component: Mapped[str | None] = mapped_column(String(255), index=True, default=None)

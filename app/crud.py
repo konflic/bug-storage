@@ -157,6 +157,7 @@ def search_similar(
     short_description: str = "",
     full_description: str = "",
     steps_to_reproduce: str = "",
+    impact: str = "",
     component: str | None = None,
     finalizer: str | None = None,
     k8s_kind: str | None = None,
@@ -201,7 +202,9 @@ def search_similar(
     # 2. Fuzzy text similarity.
     query_tokens = similarity.bug_corpus(
         title, short_description, full_description, steps_to_reproduce,
-        component, finalizer, error_signature, reason,
+        impact=impact,
+        component=component, finalizer=finalizer,
+        error_signature=error_signature, reason=reason,
     )
     for bug in db.scalars(select(Bug)).all():
         if bug.id in seen_ids:
@@ -211,10 +214,11 @@ def search_similar(
             bug.short_description,
             bug.full_description,
             bug.steps_to_reproduce,
-            bug.component,
-            bug.finalizer,
-            bug.error_signature,
-            bug.reason,
+            impact=bug.impact,
+            component=bug.component,
+            finalizer=bug.finalizer,
+            error_signature=bug.error_signature,
+            reason=bug.reason,
         )
         score = similarity.text_score(query_tokens, cand_tokens)
         if score >= threshold:
@@ -237,6 +241,7 @@ def create_bug(db: Session, payload: BugCreate) -> Bug:
         steps_to_reproduce=payload.steps_to_reproduce,
         suggested_fix=payload.suggested_fix,
         fix_notes=payload.fix_notes,
+        impact=payload.impact,
         component=payload.component,
         finalizer=payload.finalizer,
         cluster=payload.cluster,
@@ -379,6 +384,7 @@ def report(db: Session, payload: BugCreate) -> tuple[Bug, bool, str | None, floa
         short_description=payload.short_description,
         full_description=payload.full_description,
         steps_to_reproduce=payload.steps_to_reproduce,
+        impact=payload.impact,
         component=payload.component,
         finalizer=payload.finalizer,
         k8s_kind=payload.k8s_kind,

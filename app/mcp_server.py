@@ -73,6 +73,7 @@ def report_bug(
     steps_to_reproduce: str = "",
     suggested_fix: str = "",
     fix_notes: str = "",
+    impact: str = "",
     component: str | None = None,
     finalizer: str | None = None,
     cluster: str | int | None = None,
@@ -108,6 +109,8 @@ def report_bug(
         fix_notes: Post-fix record of what was ACTUALLY done and verified
             (PR/commit, clusters verified on, dates). Keep separate from
             suggested_fix so the proposal and the resolution aren't conflated.
+        impact: Potential risks / blast radius of this bug (data loss,
+            downtime, cascading failures, user-facing impact).
         component: Owning operator/component (part of signature).
         finalizer: Kubernetes finalizer involved, if any.
         cluster: Cluster id where it was observed (e.g. "12345").
@@ -137,6 +140,7 @@ def report_bug(
         "steps_to_reproduce": steps_to_reproduce,
         "suggested_fix": suggested_fix,
         "fix_notes": fix_notes,
+        "impact": impact,
         "component": component,
         "finalizer": finalizer,
         "cluster": _str_or_none(cluster),
@@ -322,6 +326,7 @@ def update_bug(
     steps_to_reproduce: str | None = None,
     suggested_fix: str | None = None,
     fix_notes: str | None = None,
+    impact: str | None = None,
     component: str | None = None,
     finalizer: str | None = None,
     status: str | None = None,
@@ -357,6 +362,7 @@ def update_bug(
         "steps_to_reproduce": steps_to_reproduce,
         "suggested_fix": suggested_fix,
         "fix_notes": fix_notes,
+        "impact": impact,
         "component": component,
         "finalizer": finalizer,
         "status": status,

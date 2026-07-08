@@ -63,6 +63,7 @@ def _bug_payload(args) -> dict:
         "steps_to_reproduce": getattr(args, "steps", "") or "",
         "suggested_fix": getattr(args, "fix", "") or "",
         "fix_notes": getattr(args, "fix_notes", "") or "",
+        "impact": getattr(args, "impact", "") or "",
         "component": getattr(args, "component", None),
         "finalizer": getattr(args, "finalizer", None),
         "cluster": getattr(args, "cluster", None),
@@ -140,7 +141,7 @@ def cmd_get(args) -> int:
 
 def cmd_update(args) -> int:
     body = {}
-    for field in ("title", "short", "full", "steps", "fix", "fix_notes", "component", "finalizer", "status"):
+    for field in ("title", "short", "full", "steps", "fix", "fix_notes", "impact", "component", "finalizer", "status"):
         val = getattr(args, field, None)
         if val is not None:
             key = {"short": "short_description", "full": "full_description",
@@ -270,6 +271,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--fix", default="", help="proposed/suggested fix")
         sp.add_argument("--fix-notes", dest="fix_notes", default="",
                         help="post-fix record: what was actually done & verified")
+        sp.add_argument("--impact", default="",
+                        help="potential risks / blast radius of this bug")
         sp.add_argument("--component")
         sp.add_argument("--finalizer")
         sp.add_argument("--cluster")
@@ -306,6 +309,8 @@ def build_parser() -> argparse.ArgumentParser:
     upd.add_argument("--fix", help="proposed/suggested fix")
     upd.add_argument("--fix-notes", dest="fix_notes",
                      help="post-fix record: what was actually done & verified")
+    upd.add_argument("--impact",
+                     help="potential risks / blast radius of this bug")
     upd.add_argument("--component")
     upd.add_argument("--finalizer")
     upd.add_argument("--status", choices=["open", "fixed", "confirmed", "wont_fix", "duplicate"])

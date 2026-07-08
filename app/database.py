@@ -36,6 +36,7 @@ _BUGS_NEW_COLUMNS: dict[str, str] = {
     "issue_key": "VARCHAR(64)",
     "issue_url": "VARCHAR(500)",
     "fix_notes": "TEXT",
+    "impact": "TEXT",
 }
 
 _OCCURRENCE_NEW_COLUMNS: dict[str, str] = {
@@ -82,6 +83,9 @@ def ensure_schema(engine) -> None:
             # empty string so the non-optional str fields in BugOut validate.
             conn.execute(
                 text("UPDATE bugs SET fix_notes = '' WHERE fix_notes IS NULL")
+            )
+            conn.execute(
+                text("UPDATE bugs SET impact = '' WHERE impact IS NULL")
             )
 
     _backfill_legacy_tags(engine)

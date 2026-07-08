@@ -362,6 +362,7 @@ async function openDetail(id, updateHash=true) {
       ${field("Short description", b.short_description)}
       ${field("Full description", b.full_description)}
       ${field("Steps to reproduce", b.steps_to_reproduce)}
+      ${field("Impact / potential risks", b.impact)}
       ${field("Suggested fix", b.suggested_fix)}
       ${field("Fix notes (what was done & verified)", b.fix_notes)}
       <div class="section-label">Occurrences (${(b.occurrences||[]).length})</div>
@@ -449,6 +450,7 @@ function formModal(bug) {
     </div>
     <div class="field"><label>Short description</label><textarea id="f_short">${v('short_description')}</textarea></div>
     <div class="field"><label>Full description</label><textarea id="f_full">${v('full_description')}</textarea></div>
+    <div class="field"><label>Impact / potential risks</label><textarea id="f_impact">${v('impact')}</textarea></div>
     <div class="field"><label>Steps to reproduce</label><textarea id="f_steps">${v('steps_to_reproduce')}</textarea></div>
     <div class="field"><label>Suggested fix</label><textarea id="f_fix">${v('suggested_fix')}</textarea></div>
     <div class="field"><label>Fix notes (what was done &amp; verified)</label><textarea id="f_fix_notes">${v('fix_notes')}</textarea></div>
@@ -484,6 +486,7 @@ async function saveBug(id) {
     cluster: $("#f_cluster").value.trim() || null,
     short_description: $("#f_short").value,
     full_description: $("#f_full").value,
+    impact: $("#f_impact").value,
     steps_to_reproduce: $("#f_steps").value,
     suggested_fix: $("#f_fix").value,
     fix_notes: $("#f_fix_notes").value,
