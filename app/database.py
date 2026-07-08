@@ -78,6 +78,11 @@ def ensure_schema(engine) -> None:
             conn.execute(
                 text("UPDATE bugs SET severity = 'unknown' WHERE severity IS NULL")
             )
+            # Newly-added text columns are nullable in existing rows; backfill to
+            # empty string so the non-optional str fields in BugOut validate.
+            conn.execute(
+                text("UPDATE bugs SET fix_notes = '' WHERE fix_notes IS NULL")
+            )
 
     _backfill_legacy_tags(engine)
 
