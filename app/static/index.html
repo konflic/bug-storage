@@ -98,6 +98,24 @@
   .toast.err { border-color: var(--red); color: var(--red); }
   .tag { font-size: 11px; color: var(--muted); }
   .muted { color: var(--muted); }
+  /* inline edit */
+  .section-label .edit-icon {
+    cursor: pointer; opacity: 0.4; margin-left: 6px; font-size: 12px;
+    transition: opacity .15s; vertical-align: middle;
+  }
+  .section-label:hover .edit-icon { opacity: 0.8; }
+  .edit-icon:hover { opacity: 1 !important; }
+  .inline-edit { margin: 4px 0 14px; }
+  .inline-edit textarea {
+    width: 100%; min-height: 90px; resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  }
+  .inline-edit .edit-actions { display: flex; gap: 6px; margin-top: 6px; }
+  .editable-title { display: flex; align-items: baseline; gap: 8px; }
+  .editable-title .edit-icon { font-size: 14px; opacity: 0.3; cursor: pointer; }
+  .editable-title:hover .edit-icon { opacity: 0.7; }
+  .inline-title-edit { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .inline-title-edit input { flex: 1; font-size: 18px; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -344,7 +362,18 @@ async function openDetail(id, updateHash=true) {
       ${o.note ? `<br>${linkBugs(o.note)}` : ""}
     </div>`).join("") || `<div class="muted">No occurrences recorded.</div>`;
 
-  const field = (label, val) => val ? `<div class="section-label">${label}</div><pre class="block">${linkBugs(val)}</pre>` : "";
+  // field() renders a section with optional inline-edit pen icon (admin only).
+  // apiField is the API field name used for PATCH; label is the display label.
+  const field = (label, val, apiField) => {
+    const editIcon = isAdmin() && apiField
+      ? `<span class="edit-icon" onclick="inlineEdit(${b.id},'${apiField}',this)" title="Edit">&#9998;</span>`
+      : "";
+    const showAlways = isAdmin() && apiField; // show empty fields for admin so they can fill them
+    if (!val && !showAlways) return "";
+    return `<div class="section-label">${label}${editIcon}</div><pre class="block" id="field_${apiField || ''}">${linkBugs(val || '')}</pre>`;
+  };
+
+  state.currentBugId = b.id;
 
   $("#bugView").innerHTML = `
     <div class="toolbar">
@@ -353,7 +382,10 @@ async function openDetail(id, updateHash=true) {
       <button class="primary" onclick="copyBugLink(${b.id})" title="Copy shareable link">🔗 Copy link</button>
     </div>
     <div class="card" style="cursor:default">
-      <h2 style="margin:0 0 8px"><span class="id">#${b.id}</span> ${esc(b.title)}</h2>
+      <div class="editable-title">
+        <h2 style="margin:0 0 8px"><span class="id">#${b.id}</span> ${esc(b.title)}</h2>
+        ${isAdmin() ? `<span class="edit-icon" onclick="inlineEditTitle(${b.id})" title="Edit title">&#9998;</span>` : ""}
+      </div>
       <div class="meta" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
         ${badge(b)}
         <span class="muted">seen ×${b.times_seen} · updated ×${b.times_updated}</span>
@@ -365,12 +397,12 @@ async function openDetail(id, updateHash=true) {
         ${b.cluster ? `<span class="muted">cluster: ${esc(b.cluster)}</span>` : ""}
       </div>
       ${(b.tags||[]).length ? `<div style="margin-bottom:6px">${b.tags.map(t=>`<span class="tag">#${esc(t)}</span>`).join(" ")}</div>` : ""}
-      ${field("Short description", b.short_description)}
-      ${field("Full description", b.full_description)}
-      ${field("Steps to reproduce", b.steps_to_reproduce)}
-      ${field("Impact / potential risks", b.impact)}
-      ${field("Suggested fix", b.suggested_fix)}
-      ${field("Fix notes (what was done & verified)", b.fix_notes)}
+      ${field("Short description", b.short_description, "short_description")}
+      ${field("Full description", b.full_description, "full_description")}
+      ${field("Steps to reproduce", b.steps_to_reproduce, "steps_to_reproduce")}
+      ${field("Impact / potential risks", b.impact, "impact")}
+      ${field("Suggested fix", b.suggested_fix, "suggested_fix")}
+      ${field("Fix notes (what was done & verified)", b.fix_notes, "fix_notes")}
       <div class="section-label">Occurrences (${(b.occurrences||[]).length})</div>
       ${occ}
       ${isAdmin() ? `
@@ -380,7 +412,6 @@ async function openDetail(id, updateHash=true) {
         <div style="margin-bottom:12px"><button onclick="linkTracker(${b.id})">Link</button></div>
       </div>
       <div class="modal-actions">
-        <button onclick="editBug(${b.id})">Edit</button>
         ${b.is_confirmed ? "" : `<button onclick="confirmBug(${b.id})">Confirm fixed</button>`}
         <button onclick="toggleFloating(${b.id}, ${!b.is_floating})">${b.is_floating ? "Unmark" : "Mark"} floating</button>
         <button onclick="showAudit(${b.id})">📜 History</button>
@@ -396,6 +427,68 @@ async function openDetail(id, updateHash=true) {
 
 // Re-render the current single-bug page (used after a mutation on it).
 function reopenBug(id) { openDetail(id, false); }
+
+// ---------- Inline per-field editing (admin only) ----------
+// Replace a <pre> field block with a textarea + Save/Cancel.
+function inlineEdit(bugId, apiField, iconEl) {
+  const pre = iconEl.closest(".section-label").nextElementSibling;
+  if (!pre || pre.tagName !== "PRE") return;
+  const oldHTML = pre.innerHTML;
+  const oldVal = pre.textContent;
+  const wrapper = document.createElement("div");
+  wrapper.className = "inline-edit";
+  wrapper.innerHTML = `
+    <textarea id="ie_${apiField}"></textarea>
+    <div class="edit-actions">
+      <button class="primary" onclick="saveField(${bugId},'${apiField}')">Save</button>
+      <button onclick="cancelEdit(this)">Cancel</button>
+    </div>`;
+  pre.replaceWith(wrapper);
+  const ta = $(`#ie_${apiField}`);
+  ta.value = oldVal;
+  ta.focus();
+  ta.selectionStart = ta.value.length;
+  // Esc to cancel
+  ta.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); cancelEdit(ta); } };
+}
+
+// Save an inline-edited field via PATCH and re-render.
+async function saveField(bugId, apiField) {
+  const ta = $(`#ie_${apiField}`);
+  if (!ta) return;
+  const val = ta.value;
+  try {
+    await api(`/bugs/${bugId}`, { method: "PATCH", body: JSON.stringify({ [apiField]: val }) });
+    toast("Saved");
+    reopenBug(bugId);
+  } catch (e) { toast(e.message, true); }
+}
+
+// Cancel inline edit: restore the original <pre> block.
+function cancelEdit(el) {
+  // Walk up to the .inline-edit wrapper, then ask the bug page to re-render.
+  const wrapper = el.closest(".inline-edit");
+  if (wrapper) wrapper.remove();
+  reopenBug(state.currentBugId);
+}
+
+// Inline-edit the bug title.
+function inlineEditTitle(bugId) {
+  const h2 = $(".editable-title h2");
+  if (!h2) return;
+  const oldVal = h2.textContent.replace(/^#\d+\s*/, "");
+  const wrapper = document.createElement("div");
+  wrapper.className = "inline-title-edit";
+  wrapper.innerHTML = `
+    <input id="ie_title" value="${esc(oldVal)}" placeholder="One-line title">
+    <button class="primary" onclick="saveField(${bugId},'title')">Save</button>
+    <button onclick="cancelEdit(this)">Cancel</button>`;
+  h2.replaceWith(wrapper);
+  const inp = $("#ie_title");
+  inp.focus();
+  inp.select();
+  inp.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); cancelEdit(inp); } };
+}
 
 async function linkTracker(id) {
   const raw = ($("#trackerUrl")?.value || "").trim();
