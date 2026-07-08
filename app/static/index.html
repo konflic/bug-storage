@@ -149,6 +149,8 @@
 const API = ""; // same origin
 const $ = (s, r=document) => r.querySelector(s);
 const esc = (s) => (s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Escape HTML, then turn "Bug #N" / "bug #N" references into clickable links.
+const linkBugs = (s) => esc(s).replace(/([Bb]ug\s*)#(\d+)/g, (_, prefix, id) => `${prefix}<a href="#/bug/${id}" style="color:var(--accent);text-decoration:underline">#${id}</a>`);
 const fmtDate = (s) => s ? new Date(s).toLocaleString() : "—";
 
 let state = { bugs: [], searchMode: false };
@@ -335,10 +337,10 @@ async function openDetail(id, updateHash=true) {
       <span class="when">${fmtDate(o.seen_at)}</span>
       ${o.cluster ? ` · cluster ${esc(o.cluster)}` : ""}
       ${o.namespace ? ` · ns ${esc(o.namespace)}` : ""}
-      ${o.note ? `<br>${esc(o.note)}` : ""}
+      ${o.note ? `<br>${linkBugs(o.note)}` : ""}
     </div>`).join("") || `<div class="muted">No occurrences recorded.</div>`;
 
-  const field = (label, val) => val ? `<div class="section-label">${label}</div><pre class="block">${esc(val)}</pre>` : "";
+  const field = (label, val) => val ? `<div class="section-label">${label}</div><pre class="block">${linkBugs(val)}</pre>` : "";
 
   $("#bugView").innerHTML = `
     <div class="toolbar">
