@@ -150,7 +150,12 @@ class Bug(Base):
     short_description: Mapped[str] = mapped_column(Text, default="")
     full_description: Mapped[str] = mapped_column(Text, default="")
     steps_to_reproduce: Mapped[str] = mapped_column(Text, default="")
+    # The PROPOSED fix (what we think should be done). Distinct from fix_notes.
     suggested_fix: Mapped[str] = mapped_column(Text, default="")
+    # Post-fix record: what was ACTUALLY done and verified (PR/commit, clusters
+    # verified on, dates). Kept separate from suggested_fix so the proposal and
+    # the resolution history don't get conflated.
+    fix_notes: Mapped[str] = mapped_column(Text, default="")
 
     # Optional structured identity fields (also feed fingerprint/signature).
     component: Mapped[str | None] = mapped_column(String(255), index=True, default=None)

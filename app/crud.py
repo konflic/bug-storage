@@ -236,6 +236,7 @@ def create_bug(db: Session, payload: BugCreate) -> Bug:
         full_description=payload.full_description,
         steps_to_reproduce=payload.steps_to_reproduce,
         suggested_fix=payload.suggested_fix,
+        fix_notes=payload.fix_notes,
         component=payload.component,
         finalizer=payload.finalizer,
         cluster=payload.cluster,

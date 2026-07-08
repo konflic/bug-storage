@@ -35,6 +35,7 @@ _BUGS_NEW_COLUMNS: dict[str, str] = {
     "error_signature": "VARCHAR(255)",
     "issue_key": "VARCHAR(64)",
     "issue_url": "VARCHAR(500)",
+    "fix_notes": "TEXT",
 }
 
 _OCCURRENCE_NEW_COLUMNS: dict[str, str] = {

@@ -40,6 +40,9 @@ class BugBase(BaseModel):
     full_description: str = ""
     steps_to_reproduce: str = ""
     suggested_fix: str = ""
+    # Post-fix record: what was actually done & verified (PR/commit, clusters,
+    # dates). Keep the proposal in suggested_fix and the resolution here.
+    fix_notes: str = ""
     component: str | None = None
     finalizer: str | None = None
     cluster: str | None = None
@@ -72,6 +75,7 @@ class BugUpdate(BaseModel):
     full_description: str | None = None
     steps_to_reproduce: str | None = None
     suggested_fix: str | None = None
+    fix_notes: str | None = None
     component: str | None = None
     finalizer: str | None = None
     cluster: str | None = None
@@ -104,6 +108,7 @@ class BugOut(BaseModel):
     full_description: str
     steps_to_reproduce: str
     suggested_fix: str
+    fix_notes: str
     component: str | None
     finalizer: str | None
     cluster: str | None

@@ -363,6 +363,7 @@ async function openDetail(id, updateHash=true) {
       ${field("Full description", b.full_description)}
       ${field("Steps to reproduce", b.steps_to_reproduce)}
       ${field("Suggested fix", b.suggested_fix)}
+      ${field("Fix notes (what was done & verified)", b.fix_notes)}
       <div class="section-label">Occurrences (${(b.occurrences||[]).length})</div>
       ${occ}
       ${isAdmin() ? `
@@ -450,6 +451,7 @@ function formModal(bug) {
     <div class="field"><label>Full description</label><textarea id="f_full">${v('full_description')}</textarea></div>
     <div class="field"><label>Steps to reproduce</label><textarea id="f_steps">${v('steps_to_reproduce')}</textarea></div>
     <div class="field"><label>Suggested fix</label><textarea id="f_fix">${v('suggested_fix')}</textarea></div>
+    <div class="field"><label>Fix notes (what was done &amp; verified)</label><textarea id="f_fix_notes">${v('fix_notes')}</textarea></div>
     <div class="row">
       <div class="field"><label>Tags (comma-separated)</label><input id="f_tags" value="${esc((b.tags||[]).join(', '))}"></div>
       ${isEdit ? `<div class="field"><label>Status</label><select id="f_status">
@@ -484,6 +486,7 @@ async function saveBug(id) {
     full_description: $("#f_full").value,
     steps_to_reproduce: $("#f_steps").value,
     suggested_fix: $("#f_fix").value,
+    fix_notes: $("#f_fix_notes").value,
     tags,
     is_floating: $("#f_floating").checked,
   };
