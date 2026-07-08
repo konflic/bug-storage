@@ -433,8 +433,8 @@ function reopenBug(id) { openDetail(id, false); }
 function inlineEdit(bugId, apiField, iconEl) {
   const pre = iconEl.closest(".section-label").nextElementSibling;
   if (!pre || pre.tagName !== "PRE") return;
-  const oldHTML = pre.innerHTML;
   const oldVal = pre.textContent;
+  const preH = pre.offsetHeight;   // match textarea height to the <pre> it replaces
   const wrapper = document.createElement("div");
   wrapper.className = "inline-edit";
   wrapper.innerHTML = `
@@ -446,6 +446,7 @@ function inlineEdit(bugId, apiField, iconEl) {
   pre.replaceWith(wrapper);
   const ta = $(`#ie_${apiField}`);
   ta.value = oldVal;
+  ta.style.minHeight = Math.max(preH, 90) + "px";
   ta.focus();
   ta.selectionStart = ta.value.length;
   // Esc to cancel
