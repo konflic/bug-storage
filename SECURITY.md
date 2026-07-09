@@ -32,8 +32,7 @@ please be aware:
   API key isn't transmitted in clear text. Do not expose port 8000 directly.
 - **Auth is disabled when `API_KEY` is empty.** This is meant for local
   development only — never run an internet-facing instance without a key.
-- **Secrets stay out of the repo.** `deploy/.env.prod`,
-  `deploy/terraform/terraform.tfvars`, and Terraform state are git-ignored.
-  Consider storing `API_KEY` in a secrets manager (e.g. YC Lockbox) for
-  production.
-- **Restrict SSH.** Lock `ssh_allowed_cidrs` (Terraform) to your own IP.
+- **Secrets stay out of the repo.** `deploy/.env.prod` is git-ignored.
+  Consider storing `API_KEY` in a secrets manager for production.
+- **Restrict SSH.** Use your cloud provider's firewall rules to lock SSH
+  access to your own IP.

@@ -7,7 +7,7 @@
       "cwd": ".",
       "enabled": true,
       "environment": {
-        "BUGDB_API": "http://103.76.55.80:8000",
+        "BUGDB_API": "http://localhost:8000",
         "BUGDB_API_KEY": ""
       }
     }

@@ -336,15 +336,14 @@ AGENT.md         guide for AI agents (MCP tools + workflow)
 
 ---
 
-## Deploying to production (Yandex Cloud)
+## Deploying to production
 
-A one-command, automated deploy to a Yandex Cloud VM (Docker + Caddy HTTPS +
-API-key auth) is described in **[DEPLOY.md](./DEPLOY.md)**. In short:
+A one-command deploy to any Linux VM (Docker + Caddy HTTPS + API-key auth) is
+described in **[DEPLOY.md](./DEPLOY.md)**. In short:
 
 ```bash
-make tf-apply     # provision the VM (Terraform)
 make set-key      # create deploy/.env.prod with a strong API_KEY (edit DOMAIN/email)
-make deploy       # rsync + build + start on the VM
+make deploy SSH_HOST=<your-vm-ip>  # rsync + build + start on the VM
 make ping         # verify https://<domain>/health
 make rotate-key   # rotate the API key later
 ```
@@ -353,7 +352,7 @@ make rotate-key   # rotate the API key later
 
 ## More
 
-- **Production deployment (Yandex Cloud):** [DEPLOY.md](./DEPLOY.md)
+- **Production deployment:** [DEPLOY.md](./DEPLOY.md)
 - **AI agent integration & full workflow:** [AGENT.md](./AGENT.md)
 - **Contributing:** [CONTRIBUTING.md](./CONTRIBUTING.md)
 - **Security policy:** [SECURITY.md](./SECURITY.md)

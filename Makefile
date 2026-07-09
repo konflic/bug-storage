@@ -1,16 +1,15 @@
-# Bug Database — automation for local dev, infra, and production deploy.
+# Bug Database — automation for local dev and production deploy.
 #
 # Quick reference:
 #   make help              list all targets
 #   make gen-key           print a fresh random API key
 #   make set-key           generate a key and write it into deploy/.env.prod
 #   make rotate-key        generate a new key, update server, restart API
-#   make tf-apply          provision the Yandex Cloud VM (Terraform)
 #   make deploy            build + (re)start the prod stack on the VM
 #   make logs / ps / down  operate the remote stack
 #
-# Config: edit deploy/.env.prod (see deploy/.env.prod.example). SSH_HOST is
-# taken from Terraform output automatically, or override: make deploy SSH_HOST=1.2.3.4
+# Config: edit deploy/.env.prod (see deploy/.env.prod.example).
+# Set SSH_HOST to the VM IP: make deploy SSH_HOST=1.2.3.4
 
 SHELL       := /bin/bash
 ENV_PROD    := deploy/.env.prod
@@ -19,11 +18,9 @@ SSH_USER    ?= ubuntu
 REMOTE_DIR  ?= /srv/bugdb
 REMOTE_DATA ?= /srv/data
 LOCAL_DB    ?= data/bugs.db
-TF_DIR      := deploy/terraform
 
-# Resolve the VM IP from Terraform output unless SSH_HOST is passed in.
-SSH_HOST ?= $(shell terraform -chdir=$(TF_DIR) output -raw public_ip 2>/dev/null)
-SSH      := ssh $(SSH_USER)@$(SSH_HOST)
+SSH_HOST    ?=
+SSH         := ssh $(SSH_USER)@$(SSH_HOST)
 
 .DEFAULT_GOAL := help
 
@@ -82,34 +79,11 @@ rotate-key: set-key ## Generate a NEW key, push it to the server, restart API
 	@echo ">> Done. New key is active. Update your clients (BUGDB_API_KEY)."
 
 # --------------------------------------------------------------------------- #
-# Infrastructure (Terraform / Yandex Cloud)
-# --------------------------------------------------------------------------- #
-.PHONY: tf-init
-tf-init: ## terraform init
-	terraform -chdir=$(TF_DIR) init
-
-.PHONY: tf-plan
-tf-plan: ## terraform plan
-	terraform -chdir=$(TF_DIR) plan
-
-.PHONY: tf-apply
-tf-apply: ## Provision the VM (terraform apply)
-	terraform -chdir=$(TF_DIR) apply
-
-.PHONY: tf-output
-tf-output: ## Show Terraform outputs (public IP, ssh command)
-	terraform -chdir=$(TF_DIR) output
-
-.PHONY: tf-destroy
-tf-destroy: ## Tear down all cloud resources
-	terraform -chdir=$(TF_DIR) destroy
-
-# --------------------------------------------------------------------------- #
 # Deploy to the VM
 # --------------------------------------------------------------------------- #
 .PHONY: check-host
 check-host:
-	@test -n "$(SSH_HOST)" || { echo "ERROR: SSH_HOST empty. Run 'make tf-apply' first or pass SSH_HOST=<ip>."; exit 1; }
+	@test -n "$(SSH_HOST)" || { echo "ERROR: SSH_HOST empty. Pass SSH_HOST=<ip>."; exit 1; }
 	@test -f $(ENV_PROD) || { echo "ERROR: $(ENV_PROD) missing. Run 'make set-key' and edit DOMAIN/ACME_EMAIL."; exit 1; }
 
 .PHONY: sync

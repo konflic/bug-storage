@@ -25,8 +25,10 @@ from .schemas import (
     SearchResult,
     SimilarBug,
     StatsOut,
+    TrackerIssueOut,
     WhoAmI,
 )
+from .tracker import TrackerError, get_tracker_client
 
 # Create tables on startup. For real migrations use Alembic (see AGENT.md);
 # create_all is fine for SQLite dev and idempotent.
@@ -225,6 +227,151 @@ def add_occurrence(bug_id: int, occ: OccurrenceIn, request: Request, db: Session
     crud.add_audit(db, actor_role=_role(request), action="sighting", bug=bug,
                    detail={"cluster": occ.cluster, "namespace": occ.namespace, "note": occ.note})
     return BugOut.model_validate(bug)
+
+
+# --------------------------------------------------------------------------- #
+# Tracker integration
+# --------------------------------------------------------------------------- #
+
+_SECTION_HEADERS = {
+    "ru": {
+        "full_description": "Полное описание",
+        "steps_to_reproduce": "Шаги воспроизведения",
+        "impact": "Влияние",
+        "footer": "Управляется bugdb (баг #{bug_id}, встречался {times_seen} раз)",
+    },
+    "en": {
+        "full_description": "Full Description",
+        "steps_to_reproduce": "Steps to Reproduce",
+        "impact": "Impact",
+        "footer": "Managed by bugdb (bug #{bug_id}, seen {times_seen}x)",
+    },
+}
+
+
+def _bug_to_tracker_description(bug) -> str:
+    """Build a tracker issue description in the configured language."""
+    lang = settings.tracker_language if settings.tracker_language in _SECTION_HEADERS else "ru"
+    h = _SECTION_HEADERS[lang]
+
+    parts: list[str] = []
+    if bug.short_description:
+        parts.append(bug.short_description)
+    if bug.full_description:
+        parts.append(f"\n## {h['full_description']}\n{bug.full_description}")
+    if bug.steps_to_reproduce:
+        parts.append(f"\n## {h['steps_to_reproduce']}\n{bug.steps_to_reproduce}")
+    if bug.impact:
+        parts.append(f"\n## {h['impact']}\n{bug.impact}")
+
+    footer = h["footer"].format(bug_id=bug.id, times_seen=bug.times_seen)
+    parts.append(f"\n---\n_{footer}_")
+    return "\n".join(parts)
+
+
+_SEVERITY_TO_PRIORITY = {
+    "critical": "critical",
+    "high": "critical",
+    "medium": "normal",
+    "low": "minor",
+    "unknown": "normal",
+}
+
+
+@app.post(
+    "/bugs/{bug_id}/tracker-issue",
+    response_model=TrackerIssueOut,
+    summary="Create or update a tracker issue for this bug",
+)
+def create_tracker_issue(
+    bug_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TrackerIssueOut:
+    """Push a bug to the external issue tracker.
+
+    - If the bug already has an ``issue_key``, the existing issue is updated.
+    - Otherwise a new issue is created in the configured queue and the bug's
+      ``issue_key`` / ``issue_url`` fields are set automatically.
+    """
+    bug = crud.get_bug(db, bug_id)
+    if not bug:
+        raise HTTPException(404, "Bug not found")
+
+    try:
+        tracker = get_tracker_client()
+    except TrackerError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+    description = _bug_to_tracker_description(bug)
+    severity_val = bug.severity.value if hasattr(bug.severity, "value") else str(bug.severity)
+    priority = _SEVERITY_TO_PRIORITY.get(severity_val, "normal")
+    tags = settings.tracker_tags_list
+    components = settings.tracker_components_list or None
+    issue_type = settings.tracker_issue_type or None
+    extra: dict = {}
+    if settings.tracker_board_id:
+        extra["boards"] = [{"id": settings.tracker_board_id}]
+
+    try:
+        if bug.issue_key:
+            # Update the existing tracker issue.
+            issue = tracker.update_issue(
+                bug.issue_key,
+                summary=bug.title,
+                description=description,
+                priority=priority,
+                tags=tags,
+            )
+            created = False
+        else:
+            # Create a new tracker issue.
+            issue = tracker.create_issue(
+                summary=bug.title,
+                description=description,
+                type=issue_type,
+                priority=priority,
+                tags=tags,
+                components=components,
+                extra_fields=extra or None,
+            )
+            created = True
+    except TrackerError as exc:
+        raise HTTPException(502, f"Tracker API error: {exc.detail}") from exc
+
+    issue_key = issue.get("key", "")
+    # Build the human-readable URL. Prefer the explicit web UI base URL;
+    # fall back to stripping the API path from the "self" link.
+    if settings.tracker_web_url:
+        base = settings.tracker_web_url.rstrip("/")
+        issue_url = f"{base}/{issue_key}"
+    else:
+        api_self = issue.get("self", "")
+        if api_self:
+            base = api_self.split("/v2/issues/")[0]
+            issue_url = f"{base}/{issue_key}"
+        else:
+            issue_url = issue_key
+
+    # Persist the link back on the bug.
+    if bug.issue_key != issue_key or bug.issue_url != issue_url:
+        bug_update = BugUpdate(issue_key=issue_key, issue_url=issue_url)
+        crud.update_bug(db, bug, bug_update)
+
+    crud.add_audit(
+        db,
+        actor_role=_role(request),
+        action="tracker_sync",
+        bug=bug,
+        detail={"issue_key": issue_key, "created": created},
+    )
+
+    return TrackerIssueOut(
+        issue_key=issue_key,
+        issue_url=issue_url,
+        created=created,
+        bug_id=bug_id,
+    )
 
 
 @app.delete("/bugs/{bug_id}", status_code=204, summary="Delete a bug")

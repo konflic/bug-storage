@@ -11,13 +11,14 @@ data/
 # Secrets
 key.txt
 
+# Local config with real credentials / IPs
+opencode.json
+
+# Tracker API spec (contains internal endpoints; keep only the .example)
+tracker-openapi.json
+
 # Local backups
 backups/
 
-# Deploy secrets & Terraform state
+# Deploy secrets
 deploy/.env.prod
-deploy/terraform/terraform.tfvars
-deploy/terraform/.terraform/
-deploy/terraform/*.tfstate
-deploy/terraform/*.tfstate.*
-deploy/terraform/*.tfstate.backup

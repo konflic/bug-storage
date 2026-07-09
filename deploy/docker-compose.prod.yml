@@ -22,7 +22,7 @@ services:
       # --- Postgres (uncomment to switch; see db service below) ---
       # DATABASE_URL: "postgresql+psycopg://bugs:${POSTGRES_PASSWORD}@db:5432/bugs"
     volumes:
-      # Host path is a mounted persistent disk on the VM (see Terraform).
+      # Host path is a mounted persistent disk on the VM.
       - /srv/data:/srv/data
     restart: unless-stopped
     expose:

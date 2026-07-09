@@ -193,3 +193,11 @@ class AuditOut(BaseModel):
 
 class RotateKeyResult(BaseModel):
     readonly_api_key: str
+
+
+class TrackerIssueOut(BaseModel):
+    """Result of creating/syncing a tracker issue for a bug."""
+    issue_key: str          # e.g. "PROJECT-123"
+    issue_url: str          # full URL to the issue in the tracker
+    created: bool           # True if new issue was created, False if updated
+    bug_id: int             # The bugsdb bug id that was linked

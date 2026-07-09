@@ -15,8 +15,8 @@
 # script path/CONTAINER there to match this deployment).
 set -euo pipefail
 
-CONTAINER="${CONTAINER:-bug-storage-api-1}"
-BACKUP_DIR="${BACKUP_DIR:-/home/chirkov/bug-storage/backups}"
+CONTAINER="${CONTAINER:-bugdb-api-1}"
+BACKUP_DIR="${BACKUP_DIR:-./backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 
 mkdir -p "$BACKUP_DIR"

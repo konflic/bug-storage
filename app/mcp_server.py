@@ -387,6 +387,19 @@ def update_bug(
         return _raise_for_status(c.patch(f"/bugs/{bug_id}", json=body))
 
 
+@mcp.tool()
+def create_tracker_issue(bug_id: int) -> dict:
+    """Push a bug to the external issue tracker.
+
+    If the bug already has an issue_key, the existing tracker issue is updated.
+    Otherwise a new issue is created and the bug's issue_key/issue_url are set.
+
+    Returns the tracker issue key, URL, and whether a new issue was created.
+    """
+    with _client() as c:
+        return _raise_for_status(c.post(f"/bugs/{bug_id}/tracker-issue"))
+
+
 def main() -> None:
     mcp.run()  # stdio transport
 

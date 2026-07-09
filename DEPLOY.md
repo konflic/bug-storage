@@ -1,8 +1,8 @@
-# Deploying to Yandex Cloud
+# Deploying to production
 
-Deploy the Bug Database API to a single Yandex Cloud VM running Docker, with
-Caddy providing automatic HTTPS and the built-in API-key auth for access
-control. Everything is automated through the `Makefile`.
+Deploy the Bug Database API to a Linux VM running Docker, with Caddy providing
+automatic HTTPS and the built-in API-key auth for access control. Everything is
+automated through the `Makefile`.
 
 Architecture:
 
@@ -15,37 +15,36 @@ Internet ──443──> Caddy (TLS, Let's Encrypt) ──8000 (internal)──
 
 ---
 
-## Prerequisites (on your machine)
+## Prerequisites
 
-- `terraform`, `docker`, `rsync`, `ssh`, and the `yc` CLI (for auth).
-- An SSH key pair (e.g. `~/.ssh/id_ed25519.pub`).
+**On the VM** (any cloud provider or bare-metal):
+- Ubuntu/Debian (or similar), with Docker and Docker Compose installed.
+- A persistent disk mounted at `/srv/data` (for the SQLite database).
+- Port 80 and 443 open (for Caddy / Let's Encrypt).
+
+**On your machine:**
+- `docker`, `rsync`, `ssh`.
+- An SSH key pair with access to the VM.
 - A domain name you can point at the VM (an A record).
-- A Yandex Cloud account with a `cloud_id` and `folder_id`.
-
-Authenticate the Terraform provider once:
-```bash
-yc init                       # or export a service-account key
-export YC_TOKEN=$(yc iam create-token)
-```
 
 ---
 
 ## Step-by-step
 
-### 1. Provision the VM
-```bash
-cd deploy/terraform
-cp terraform.tfvars.example terraform.tfvars
-# edit terraform.tfvars: cloud_id, folder_id, ssh key path,
-# and lock ssh_allowed_cidrs to your IP (curl ifconfig.me)
-cd ../..
+### 1. Provision a VM
 
-make tf-init
-make tf-apply                 # prints the VM's public_ip when done
+Create a VM with your cloud provider of choice. Install Docker:
+
+```bash
+ssh ubuntu@<vm-ip>
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+sudo mkdir -p /srv/data
 ```
 
 ### 2. Point your domain at the VM
-Create an **A record**: `bugs.example.com -> <public_ip from tf output>`.
+
+Create an **A record**: `bugs.example.com -> <vm-ip>`.
 Wait for DNS to propagate (`dig bugs.example.com`). Caddy needs this to issue
 the TLS certificate.
 
@@ -57,13 +56,12 @@ Then edit `deploy/.env.prod` and set `DOMAIN` and `ACME_EMAIL`.
 
 ### 4. Deploy
 ```bash
-make deploy                   # rsyncs the repo to the VM, builds, starts stack
+make deploy SSH_HOST=<vm-ip>  # rsyncs the repo to the VM, builds, starts stack
 ```
-(The VM's Docker + `/srv/data` disk were set up automatically by cloud-init.)
 
 ### 5. Verify
 ```bash
-make ping                     # GET https://<domain>/health -> {"status":"ok",...}
+make ping SSH_HOST=<vm-ip>    # GET https://<domain>/health -> {"status":"ok",...}
 ```
 
 ### 6. Use it (clients must send the key)
@@ -85,8 +83,8 @@ VM's persistent `/srv/data` disk. One command automates it (snapshot → stop AP
 → copy → restart):
 
 ```bash
-make seed-remote                 # uses ./data/bugs.db by default
-make seed-remote LOCAL_DB=path/to/other.db
+make seed-remote SSH_HOST=<vm-ip>                  # uses ./data/bugs.db by default
+make seed-remote SSH_HOST=<vm-ip> LOCAL_DB=path/to/other.db
 ```
 
 It asks for a `yes` confirmation because it **overwrites** the remote database.
@@ -96,11 +94,11 @@ schema on restart, so a DB from an older version is fine.
 
 Verify afterwards:
 ```bash
-make ping
+make ping SSH_HOST=<vm-ip>
 BUGDB_API=https://<domain> BUGDB_API_KEY=$(make -s show-key) ./bugctl list
 ```
 
-> This is for **SQLite → SQLite**. Migrating to Managed PostgreSQL is not a file
+> This is for **SQLite → SQLite**. Migrating to PostgreSQL is not a file
 > copy — replay the data through the API instead (ask for a transfer script).
 
 ---
@@ -109,7 +107,7 @@ BUGDB_API=https://<domain> BUGDB_API_KEY=$(make -s show-key) ./bugctl list
 
 One command generates a new key, pushes it to the server, and restarts the API:
 ```bash
-make rotate-key
+make rotate-key SSH_HOST=<vm-ip>
 ```
 Then update your clients' `BUGDB_API_KEY` (and the MCP `opencode.json`) with the
 new value — `make show-key` prints it. Old keys stop working immediately.
@@ -126,26 +124,23 @@ make show-key     # show the key currently in deploy/.env.prod
 
 | Command | What it does |
 |---------|--------------|
-| `make deploy` | Rebuild + restart after code changes |
-| `make logs` | Tail remote container logs |
-| `make ps` | Remote container status |
-| `make ssh` | SSH into the VM |
-| `make down` | Stop the stack |
-| `make tf-destroy` | Delete all cloud resources |
+| `make deploy SSH_HOST=<ip>` | Rebuild + restart after code changes |
+| `make logs SSH_HOST=<ip>` | Tail remote container logs |
+| `make ps SSH_HOST=<ip>` | Remote container status |
+| `make ssh SSH_HOST=<ip>` | SSH into the VM |
+| `make down SSH_HOST=<ip>` | Stop the stack |
 
 ### Backups
 
-Two options (use both for defense in depth):
-
 - **App-level dumps (built in):**
   ```bash
-  make install-backup-cron    # daily 03:30 backup on the VM -> /srv/backups
-  make backup                 # run a one-off backup now
-  make fetch-backups          # pull remote backups into ./backups locally
+  make install-backup-cron SSH_HOST=<ip>  # daily 03:30 backup -> /srv/backups
+  make backup SSH_HOST=<ip>               # run a one-off backup now
+  make fetch-backups SSH_HOST=<ip>        # pull remote backups into ./backups locally
   ```
   Uses `scripts/backup.sh` (SQLite online-backup + gzip + 14-day retention).
 - **Disk snapshots:** the DB lives on the persistent `/srv/data` disk; snapshot
-  it from the YC console or `yc compute snapshot create` on a schedule.
+  it with your cloud provider's snapshot API on a schedule.
 
 ### Continuous deployment (GitHub Actions)
 
@@ -157,12 +152,12 @@ environment-specific is committed — it all comes from secrets.
 
 ---
 
-## Switching to Managed PostgreSQL (optional, for scale/managed backups)
+## Switching to PostgreSQL (optional, for scale/managed backups)
 
 SQLite is single-writer (one API replica). To move to Postgres:
 
-- **Managed option:** create a *Managed Service for PostgreSQL* cluster in YC,
-  then set in `deploy/.env.prod`:
+- **Managed option:** create a managed PostgreSQL instance with your cloud
+  provider, then set in `deploy/.env.prod`:
   ```
   DATABASE_URL=postgresql+psycopg://user:pass@<host>:6432/bugs
   ```
@@ -180,7 +175,6 @@ SQLite is single-writer (one API replica). To move to Postgres:
 - API-key auth is a single shared secret — good for a small internal API, but
   there's no per-user revocation; rotating means updating every client.
 - Always keep it behind HTTPS (Caddy does this) so the key isn't sent in clear.
-- `deploy/.env.prod` and `terraform.tfvars` are git-ignored — never commit them.
-  For stronger secret handling, store `API_KEY` in **YC Lockbox**.
-- SSH is restricted by `ssh_allowed_cidrs`; keep it locked to your IP.
-```
+- `deploy/.env.prod` is git-ignored — never commit it.
+  For stronger secret handling, store `API_KEY` in a secrets manager.
+- Restrict SSH access to your own IP using your cloud provider's firewall rules.
